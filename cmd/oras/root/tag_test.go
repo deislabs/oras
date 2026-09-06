@@ -23,9 +23,9 @@ import (
 	"testing"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content/memory"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/memory"
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
 	"oras.land/oras/internal/listener"
 )

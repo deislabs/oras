@@ -27,12 +27,13 @@ import (
 	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content"
+	"github.com/oras-project/oras-go/v3/content/oci"
+	"github.com/oras-project/oras-go/v3/registry"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/content/oci"
-	"oras.land/oras-go/v2/registry"
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
@@ -427,12 +428,12 @@ func parseArtifactReferences(artifactRefs string) (string, []string, error) {
 	extraTags := refParts[1:]
 
 	// validate repository
-	parsedRepo, err := registry.ParseReference(mainRef)
+	parsedRepo, err := properties.NewReference(mainRef)
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid reference %q: %w", mainRef, err)
 	}
-	mainTag := parsedRepo.Reference
-	parsedRepo.Reference = "" // clear the tag
+	mainTag := parsedRepo.Tag
+	parsedRepo.Tag = "" // clear the tag
 	repository := parsedRepo.String()
 	if mainTag == "" && len(extraTags) == 0 {
 		// no tags
@@ -445,10 +446,11 @@ func parseArtifactReferences(artifactRefs string) (string, []string, error) {
 		if tag == "" {
 			return "", nil, fmt.Errorf("empty tag in reference %q", artifactRefs)
 		}
-		parsedRepo.Reference = tag
-		if err := parsedRepo.ValidateReferenceAsTag(); err != nil {
+		parsedRepo.Tag = tag
+		if err := parsedRepo.ValidateTag(); err != nil {
 			return "", nil, fmt.Errorf("invalid tag %q in reference %q: %w", tag, artifactRefs, err)
 		}
+		parsedRepo.Tag = ""
 	}
 	return repository, tags, nil
 }

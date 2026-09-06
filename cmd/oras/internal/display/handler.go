@@ -20,7 +20,7 @@ import (
 	"os"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	fetcher "oras.land/oras-go/v2/content"
+	fetcher "github.com/oras-project/oras-go/v3/content"
 
 	"oras.land/oras/cmd/oras/internal/display/content"
 	"oras.land/oras/cmd/oras/internal/display/metadata"

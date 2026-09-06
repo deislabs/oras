@@ -19,8 +19,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 func TestCommonParse_CreatesFreshAuthCaches(t *testing.T) {
@@ -54,7 +55,7 @@ func TestCommonParse_ExplicitSharedAuthCache(t *testing.T) {
 		t.Fatal("expected an auth cache store")
 	}
 	const registry, scope = "registry.example.com", "repository:test:pull"
-	identity := newCredentialIdentity(auth.Credential{Username: "user", Password: "password"}, nil)
+	identity := newCredentialIdentity(credentials.Credential{Username: "user", Password: "password"}, nil)
 	if _, err := first.authCaches.cache(identity).Set(ctx, registry, auth.SchemeBearer, scope, func(context.Context) (string, error) {
 		return "cached-token", nil
 	}); err != nil {

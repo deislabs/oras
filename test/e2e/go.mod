@@ -8,7 +8,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
-	oras.land/oras-go/v2 v2.7.0
 )
 
 require (
@@ -17,6 +16,7 @@ require (
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
+	github.com/oras-project/oras-go/v3 v3.0.0-rc.1
 	github.com/stretchr/testify v1.12.1 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.41.0 // indirect

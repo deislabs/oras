@@ -16,9 +16,9 @@ limitations under the License.
 package root
 
 import (
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 	"oras.land/oras/cmd/oras/internal/argument"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/internal/credential"
@@ -66,5 +66,5 @@ func runLogout(cmd *cobra.Command, opts logoutOptions) error {
 	if err != nil {
 		return err
 	}
-	return credentials.Logout(ctx, store, opts.hostname)
+	return remote.Logout(ctx, store, opts.hostname)
 }

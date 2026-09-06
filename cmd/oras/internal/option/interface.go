@@ -16,9 +16,9 @@ limitations under the License.
 package option
 
 import (
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/registry"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content"
+	"github.com/oras-project/oras-go/v3/registry"
 )
 
 // ResolvableDeleter a target that resolve and delete

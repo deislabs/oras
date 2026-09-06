@@ -20,8 +20,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/oras-project/oras-go/v3"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2"
 )
 
 func TestBinaryTarget_ModifyError(t *testing.T) {

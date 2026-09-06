@@ -24,10 +24,10 @@ import (
 	"oras.land/oras/cmd/oras/internal/display/metadata"
 	"oras.land/oras/internal/listener"
 
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/errdef"
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/errdef"
-	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
@@ -110,9 +110,7 @@ func tagManifest(cmd *cobra.Command, opts *tagOptions) error {
 		return err
 	}
 	if targetRepo, ok := target.(*remote.Repository); ok {
-		// Since referrer capability has not been set or detected yet,
-		// nil is the only returned value and thus can be ignored
-		_ = targetRepo.SetReferrersCapability(true)
+		targetRepo.SetReferrersCapability(true)
 	}
 	if err := opts.EnsureReferenceNotEmpty(cmd, true); err != nil {
 		return err

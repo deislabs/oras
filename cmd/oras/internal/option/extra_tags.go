@@ -19,7 +19,7 @@ import (
 	"errors"
 	"fmt"
 
-	"oras.land/oras-go/v2/registry"
+	"github.com/oras-project/oras-go/v3/registry"
 )
 
 // ValidateExtraTags validates additional destination tags.

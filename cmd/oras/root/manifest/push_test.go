@@ -23,8 +23,8 @@ import (
 	"testing"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/content/memory"
+	"github.com/oras-project/oras-go/v3/content"
+	"github.com/oras-project/oras-go/v3/content/memory"
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
 	"oras.land/oras/cmd/oras/internal/option"
 )

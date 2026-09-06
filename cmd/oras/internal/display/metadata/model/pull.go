@@ -22,7 +22,7 @@ import (
 	"sync"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2/content/file"
+	"github.com/oras-project/oras-go/v3/content/file"
 )
 
 // File records metadata of a pulled file.

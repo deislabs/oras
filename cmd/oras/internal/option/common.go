@@ -19,9 +19,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras/cmd/oras/internal/output"
 )
 

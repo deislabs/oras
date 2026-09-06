@@ -28,7 +28,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2"
+	"github.com/oras-project/oras-go/v3"
 	"oras.land/oras/test/e2e/internal/testdata/artifact/blob"
 	"oras.land/oras/test/e2e/internal/testdata/artifact/config"
 	"oras.land/oras/test/e2e/internal/testdata/artifact/index"

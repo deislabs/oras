@@ -29,15 +29,15 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/oras-project/oras-go/v3/errdef"
+	"github.com/oras-project/oras-go/v3/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
+	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"oras.land/oras-go/v2/errdef"
-	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
-	"oras.land/oras-go/v2/registry/remote/errcode"
-	"oras.land/oras-go/v2/registry/remote/retry"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/internal/credential"
 	"oras.land/oras/internal/crypto"
@@ -59,13 +59,13 @@ func (remo *Remote) ensureAuthCaches(common Common) {
 // credential store is identified by its config paths. The key is held only in
 // memory and is compared directly, so no secret is hashed or encoded.
 type credentialIdentity struct {
-	cred    auth.Credential
+	cred    credentials.Credential
 	configs string
 }
 
 // newCredentialIdentity returns the credential identity of a client.
-func newCredentialIdentity(cred auth.Credential, configs []string) credentialIdentity {
-	if cred != auth.EmptyCredential {
+func newCredentialIdentity(cred credentials.Credential, configs []string) credentialIdentity {
+	if !cred.IsEmpty() {
 		return credentialIdentity{cred: cred}
 	}
 	return credentialIdentity{configs: strings.Join(configs, "\x00")}
@@ -431,7 +431,7 @@ func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *
 	client = &auth.Client{
 		Client: &http.Client{
 			// http.RoundTripper with a retry using the DefaultPolicy
-			// see: https://pkg.go.dev/oras.land/oras-go/v2/registry/remote/retry#Policy
+			// see: https://pkg.go.dev/github.com/oras-project/oras-go/v3/registry/remote/retry#Policy
 			Transport: transport,
 		},
 		Cache:  cache,
@@ -441,9 +441,14 @@ func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *
 	if debug {
 		client.Client.Transport = trace.NewTransport(client.Client.Transport, sensitiveHeaders...)
 	}
+	// oras-go v3 defaults to the OAuth2 password grant for username/password
+	// credentials. Keep the v2 behavior of the distribution-spec token flow,
+	// which is the only flow some registries implement. Set after SetUserAgent
+	// so the fetcher captures the populated header.
+	client.TokenFetcher = auth.NewCompositeTokenFetcher(client.Client, client.Header, client.ClientID, true)
 
-	if cred != auth.EmptyCredential {
-		client.Credential = func(_ context.Context, _ string) (auth.Credential, error) {
+	if !cred.IsEmpty() {
+		client.CredentialFunc = func(_ context.Context, _ string) (credentials.Credential, error) {
 			return cred, nil
 		}
 	} else {
@@ -452,7 +457,7 @@ func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *
 		if err != nil {
 			return nil, err
 		}
-		client.Credential = credentials.Credential(remo.store)
+		client.CredentialFunc = remo.store.Get
 	}
 
 	return
@@ -487,7 +492,7 @@ func (remo *Remote) parseCustomHeaders() error {
 }
 
 // Credential returns a credential based on the remote options.
-func (remo *Remote) Credential() auth.Credential {
+func (remo *Remote) Credential() credentials.Credential {
 	return credential.Credential(remo.Username, remo.Secret)
 }
 
@@ -533,18 +538,16 @@ func (remo *Remote) NewRepository(reference string, common Common, logger logrus
 		}
 		return nil, err
 	}
-	registry := repo.Reference.Registry
-	repo.PlainHTTP = remo.isPlainHTTP(registry)
-	repo.HandleWarning = remo.handleWarning(registry, logger)
+	registry := repo.Registry.Reference.Registry
+	repo.Registry.PlainHTTP = remo.isPlainHTTP(registry)
+	repo.Registry.HandleWarning = remo.handleWarning(registry, logger)
 	remo.ensureAuthCaches(common)
-	if repo.Client, err = remo.authClient(repo.Reference.Host(), repo.PlainHTTP, common.Debug); err != nil {
+	if repo.Registry.Client, err = remo.authClient(repo.Reference().Host(), repo.Registry.PlainHTTP, common.Debug); err != nil {
 		return nil, err
 	}
 	repo.SkipReferrersGC = true
 	if remo.ReferrersAPI != ReferrersStateUnknown {
-		if err := repo.SetReferrersCapability(remo.ReferrersAPI == ReferrersStateSupported); err != nil {
-			return nil, err
-		}
+		repo.SetReferrersCapability(remo.ReferrersAPI == ReferrersStateSupported)
 	}
 	return
 }

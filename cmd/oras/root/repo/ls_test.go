@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"oras.land/oras-go/v2/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
 )
 

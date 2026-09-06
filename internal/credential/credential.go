@@ -15,16 +15,16 @@ limitations under the License.
 
 package credential
 
-import "oras.land/oras-go/v2/registry/remote/auth"
+import "github.com/oras-project/oras-go/v3/registry/remote/credentials"
 
 // Credential converts user input username and password to a credential.
-func Credential(username, password string) auth.Credential {
+func Credential(username, password string) credentials.Credential {
 	if username == "" {
-		return auth.Credential{
+		return credentials.Credential{
 			RefreshToken: password,
 		}
 	}
-	return auth.Credential{
+	return credentials.Credential{
 		Username: username,
 		Password: password,
 	}

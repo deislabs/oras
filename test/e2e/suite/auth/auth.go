@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
-	"oras.land/oras-go/v2"
+	"github.com/oras-project/oras-go/v3"
 	"oras.land/oras/test/e2e/internal/testdata/feature"
 	"oras.land/oras/test/e2e/internal/testdata/foobar"
 	. "oras.land/oras/test/e2e/internal/utils"

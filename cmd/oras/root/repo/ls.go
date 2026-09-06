@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"

@@ -37,11 +37,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
 var ts *httptest.Server
@@ -137,7 +138,7 @@ func TestRemote_authClient_RawCredential(t *testing.T) {
 	if _, err := rand.Read(password); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := auth.Credential{
+	want := credentials.Credential{
 		Username: "mocked^^??oras-@@!#",
 		Password: base64.StdEncoding.EncodeToString(password),
 	}
@@ -149,7 +150,7 @@ func TestRemote_authClient_RawCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got, err := client.Credential(nil, "")
+	got, err := client.CredentialFunc(nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -317,9 +318,9 @@ func TestRemote_authClient_SharedCacheWiring(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		client, ok := repo.Client.(*auth.Client)
+		client, ok := repo.Registry.Client.(*auth.Client)
 		if !ok {
-			t.Fatalf("unexpected client type %T", repo.Client)
+			t.Fatalf("unexpected client type %T", repo.Registry.Client)
 		}
 		return client.Cache
 	}
