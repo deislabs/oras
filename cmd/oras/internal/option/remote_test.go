@@ -39,6 +39,7 @@ import (
 
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -1249,5 +1250,32 @@ func TestRemote_authClientDoesNotShareHeaderState(t *testing.T) {
 	}
 	if got := header.Get("User-Agent"); !strings.HasPrefix(got, "oras/") {
 		t.Fatalf("different origin received User-Agent %q, want oras/ prefix", got)
+	}
+}
+
+func TestRemote_NewRepository_referrersAPI(t *testing.T) {
+	tests := []struct {
+		name  string
+		state referrersState
+		want  properties.ReferrersAPI
+	}{
+		{"unknown", ReferrersStateUnknown, properties.ReferrersAPIUnknown},
+		{"supported", ReferrersStateSupported, properties.ReferrersAPISupported},
+		{"unsupported", ReferrersStateUnsupported, properties.ReferrersAPIUnsupported},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := Remote{
+				DistributionSpec: DistributionSpec{ReferrersAPI: tt.state},
+				plainHTTP:        plainHTTPNotSpecified,
+			}
+			repo, err := opts.NewRepository("localhost:5000/test", Common{}, logrus.New())
+			if err != nil {
+				t.Fatalf("Remote.NewRepository() error = %v", err)
+			}
+			if got := repo.ReferrersCapability(); got != tt.want {
+				t.Errorf("Repository.ReferrersCapability() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

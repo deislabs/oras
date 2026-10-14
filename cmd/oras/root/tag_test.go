@@ -18,6 +18,9 @@ package root
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,6 +32,24 @@ import (
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
 	"oras.land/oras/internal/listener"
 )
+
+func Test_tagManifest_remoteNotFound(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+	uri, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmd := tagCmd()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--plain-http", uri.Host + "/test:v1", "v2"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("tag error = nil, want not found error")
+	}
+}
 
 func Test_tagCmd_requiresSourceAndDestination(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "oras"}
