@@ -12,8 +12,6 @@ oras-go v3 introduces a new module path (`github.com/oras-project/oras-go/v3`), 
 - Fixing a process-safety bug in the cache (`oci.New` vs `oci.NewStorage`).
 - Unlocking new user-facing capabilities: Podman auth.json credentials, per-registry TLS from `certs.d`, and automatic registry mirrors via `registries.conf`.
 
-Reference: [`oras-go/docs/SCENARIOS.md`](https://github.com/oras-project/oras-go/blob/main/docs/SCENARIOS.md) and [`oras-go/docs/migration-v3/`](https://github.com/oras-project/oras-go/blob/main/docs/migration-v3/).
-
 ## Background & Context
 
 ### What PR #2002 Already Covers
@@ -25,10 +23,15 @@ The branch `feat/migrate-to-oras-go-v3` completes the mechanical migration:
 | ✅ Done | Import path `oras.land/oras-go/v2` → `github.com/oras-project/oras-go/v3` |
 | ✅ Done | `auth.Credential{}` → `credentials.Credential{}` |
 | ✅ Done | `client.Credential =` → `client.CredentialFunc =` |
+| ✅ Done | `credentials.Credential(store)` / `store.Get` → `remote.NewCredentialFunc(store)` |
+| ✅ Done | Username/password token flow kept via `auth.NewCompositeTokenFetcher` |
 | ✅ Done | `credentials.Login/Logout` → `remote.Login/Logout` |
 | ✅ Done | `repo.Client/PlainHTTP/HandleWarning` → `repo.Registry.*` |
 | ✅ Done | `repo.Reference.Repository` → `repo.RepositoryName` |
 | ✅ Done | `ref.Reference` (field) → `ref.GetReference()` |
+| ✅ Done | `registry.ParseReference` → `properties.NewReference` |
+| ✅ Done | `ref.ValidateReferenceAsTag()` → `ref.ValidateTag()` |
+| ✅ Done | `auth.AppendRepositoryScope` takes `properties.Reference` |
 | ✅ Done | `SetReferrersCapability()` — void, no longer returns error |
 
 ### New Packages in oras-go v3
@@ -61,9 +64,9 @@ The branch `feat/migrate-to-oras-go-v3` completes the mechanical migration:
 
 #### 1.1 Fix Cache Process-Safety: `oci.New()` → `oci.NewStorage()`
 
-**File:** `cmd/oras/internal/option/cache.go:34`
+**File:** `cmd/oras/internal/option/cache.go` (`CachedTarget`)
 
-`oci.New()` maintains an `index.json` file that is not safe for concurrent process access. `oci.NewStorage()` omits `index.json` writes and is designed for shared cache use. (SCENARIOS.md §8.)
+`oci.New()` maintains an `index.json` file that is not safe for concurrent process access. `oci.NewStorage()` omits `index.json` writes and is designed for shared cache use.
 
 ```go
 // Before
@@ -99,9 +102,9 @@ Net reduction: ~100 lines of duplicated implementation removed.
 
 #### 1.3 Replace Custom `handleWarning()` with `remote.NewWarningLogger()`
 
-**File:** `cmd/oras/internal/option/remote.go:327-342`
+**File:** `cmd/oras/internal/option/remote.go` (`handleWarning`)
 
-The custom `handleWarning()` function with its `sync.Map` de-duplication tracks exactly what `remote.NewWarningLogger(registry, *slog.Logger)` provides in v3. (SCENARIOS.md §11.)
+The custom `handleWarning()` function with its `sync.Map` de-duplication tracks exactly what `remote.NewWarningLogger(registry, *slog.Logger)` provides in v3.
 
 The complication is that ORAS uses `logrus` while `NewWarningLogger` takes `*slog.Logger`. The fix requires a small slog→logrus bridge handler:
 
@@ -138,7 +141,7 @@ slogLogger := slog.New(logutil.NewLogrusHandler(logger))
 repo.Registry.HandleWarning = remote.NewWarningLogger(registry, slogLogger)
 ```
 
-This removes `warned map[string]*sync.Map` from the `Remote` struct, removes the init code in `binary_target.go:63-64`, and eliminates the per-registry state tracking (~25 lines).
+This removes `warned map[string]*sync.Map` from the `Remote` struct, removes the `warned` map initialization in `binary_target.go`, and eliminates the per-registry state tracking (~25 lines).
 
 #### 1.4 Replace Custom Trace Transport with `remote.NewLoggingTransport()`
 
@@ -203,7 +206,7 @@ func (remo *Remote) newClientBuilder(debug bool) (*remote.ClientBuilder, error) 
 }
 
 func (remo *Remote) NewRepository(reference string, common Common, logger logrus.FieldLogger) (*remote.Repository, error) {
-    props, err := properties.NewReference(reference)
+    props, err := properties.NewRegistry(reference)
     if err != nil {
         return nil, err
     }
@@ -230,7 +233,7 @@ func (remo *Remote) NewRepository(reference string, common Common, logger logrus
         return nil, err
     }
 
-    repo, err := remote.NewRepositoryWithProperties(props, builder)
+    repo, err := builder.NewRepository(props)
     if err != nil {
         return nil, err
     }
@@ -242,7 +245,7 @@ func (remo *Remote) NewRepository(reference string, common Common, logger logrus
 }
 ```
 
-`NewRepositoryWithProperties` also calls `NewWarningLogger` automatically, eliminating the need to set `HandleWarning` manually.
+`ClientBuilder.NewRepository` also sets `HandleWarning` via `NewWarningLogger` automatically, eliminating the need to set `HandleWarning` manually.
 
 #### 2.2 `config.LoadConfigs()` for Full Ecosystem Config Stack
 
@@ -250,7 +253,7 @@ func (remo *Remote) NewRepository(reference string, common Common, logger logrus
 
 **Current:** Only reads Docker `config.json` via `credential.NewStore()`. Ignores containers `auth.json`, per-registry TLS from `certs.d`, and registry mirrors from `registries.conf`.
 
-**New:** Use `config.LoadConfigs()` as the baseline, then override with CLI flags. This follows Scenario 2 (CLI Tool with Flag Overrides) from SCENARIOS.md exactly.
+**New:** Use `config.LoadConfigs()` as the baseline, then override with CLI flags.
 
 ```go
 import "github.com/oras-project/oras-go/v3/registry/remote/config"
@@ -318,7 +321,7 @@ func (remo *Remote) registryProperties(reference string) (*properties.Registry, 
 
 **Files:** `cmd/oras/root/cp.go`, `cmd/oras/root/push.go`, `cmd/oras/root/pull.go`, `cmd/oras/root/attach.go`
 
-v3 wraps copy failures in `*oras.CopyError` which identifies whether the failure originated at the source or destination and which descriptor failed. (SCENARIOS.md §15.)
+v3 wraps copy failures in `*oras.CopyError` which identifies whether the failure originated at the source or destination and which descriptor failed.
 
 ```go
 // In runCopy(), runPush(), runPull(), runAttach() after oras.Copy() calls:
@@ -341,30 +344,16 @@ if err != nil {
 
 This improves the user experience for `oras cp` failures, which often happen due to auth or network issues on one side of a registry-to-registry copy, making the error message clearly actionable.
 
-#### 2.4 `remote.NewCredentialFunc()` Instead of `store.Get` Directly
-
-**File:** `cmd/oras/internal/option/remote.go:289`
-
-Minor hardening: `remote.NewCredentialFunc(store)` gracefully handles a nil store (returns empty credentials), whereas `store.Get` would panic. With `ClientBuilder` adoption this is handled internally, but as a standalone fix:
-
-```go
-// Before
-client.CredentialFunc = remo.store.Get
-
-// After
-client.CredentialFunc = remote.NewCredentialFunc(remo.store)
-```
-
 ### Part 3 — Future Work (Separate PRs)
 
 The following new v3 capabilities require new CLI flags and more substantial user-facing design. They are not part of the oras-go v3 migration PR but are enabled by it.
 
-| Capability | oras-go Package | SCENARIOS.md | Notes |
-|------------|----------------|--------------|-------|
-| Policy enforcement (`--policy-file`) | `registry/remote/policy` | §3 | Requires UX design for `insecureAcceptAnything` / `reject` / `signedBy` rules |
-| OpenPGP signature verification | `registry/remote/signature` | §10 | Depends on `registries.d` config support and lookaside store URLs |
-| `objects` package for push/pack | `objects` | §5 | Higher-level alternative to `PackManifest`; consider for `oras push` simplification |
-| `ParseReferenceList` for multi-tag | `registry` | §4 | Convenience for `oras tag` with comma-separated tags |
+| Capability | oras-go Package | Notes |
+|------------|----------------|-------|
+| Policy enforcement (`--policy-file`) | `registry/remote/policy` | Requires UX design for `insecureAcceptAnything` / `reject` / `signedBy` rules |
+| OpenPGP signature verification | `registry/remote/signature` | Depends on `registries.d` config support and lookaside store URLs |
+| `objects` package for push/pack | `objects` | Higher-level alternative to `PackManifest`; consider for `oras push` simplification |
+| `properties.NewReferenceList` for multi-tag | `registry/remote/properties` | Convenience for `oras tag` with comma-separated tags |
 
 ### Implementation Order
 
@@ -378,9 +367,8 @@ The following new v3 capabilities require new CLI flags and more substantial use
 | 6 | `config.LoadConfigs()` full config stack | `option/remote.go` | +30 | 5 |
 | 7 | `remote.NewLoggingTransport()` via `builder.Logger` | `option/remote.go`, `internal/trace/` | −160 | 5 |
 | 8 | `oras.CopyError` structured errors | `root/cp.go`, `root/push.go`, etc. | +20 | — |
-| 9 | `remote.NewCredentialFunc()` | `option/remote.go` | −2 | — (or covered by 5) |
 
-Steps 1–2 are self-contained bug fixes. Steps 3–7 form a coherent refactor of the remote client construction path. Steps 8–9 are independent improvements.
+Steps 1–2 are self-contained bug fixes. Steps 3–7 form a coherent refactor of the remote client construction path. Step 8 is an independent improvement.
 
 ## Impact to Users and Ecosystem
 
