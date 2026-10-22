@@ -17,6 +17,7 @@ package root
 
 import (
 	"github.com/oras-project/oras-go/v3/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"oras.land/oras/cmd/oras/internal/argument"
@@ -66,5 +67,5 @@ func runLogout(cmd *cobra.Command, opts logoutOptions) error {
 	if err != nil {
 		return err
 	}
-	return remote.Logout(ctx, store, opts.hostname)
+	return remote.Logout(ctx, store, properties.Resource{Registry: opts.hostname})
 }

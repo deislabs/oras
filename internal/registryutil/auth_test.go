@@ -22,28 +22,30 @@ import (
 
 	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 )
 
 func TestWithScopeHint(t *testing.T) {
 	tests := []struct {
 		name string
 		ref  string
-		// host under which the auth client looks the scopes up
-		wantHost   string
+		// resource, as derived from the request, under which the auth client
+		// looks the scopes up
+		lookup     properties.Resource
 		wantScopes []string
 	}{
 		{
 			// docker.io resolves to registry-1.docker.io, so the hint must be
-			// keyed by the request host rather than the registry name.
+			// found when looked up by the request host.
 			name:       "docker hub",
 			ref:        "docker.io/library/alpine",
-			wantHost:   "registry-1.docker.io",
+			lookup:     properties.Resource{Registry: "registry-1.docker.io", Path: "library/alpine"},
 			wantScopes: []string{"repository:library/alpine:pull,push"},
 		},
 		{
 			name:       "other registry",
 			ref:        "registry.example.com/team/app",
-			wantHost:   "registry.example.com",
+			lookup:     properties.Resource{Registry: "registry.example.com", Path: "team/app"},
 			wantScopes: []string{"repository:team/app:pull,push"},
 		},
 	}
@@ -54,8 +56,12 @@ func TestWithScopeHint(t *testing.T) {
 				t.Fatalf("NewRepository() error = %v", err)
 			}
 			ctx := WithScopeHint(context.Background(), repo, auth.ActionPull, auth.ActionPush)
-			if got := auth.GetScopesForHost(ctx, tt.wantHost); !reflect.DeepEqual(got, tt.wantScopes) {
-				t.Errorf("GetScopesForHost(%q) = %v, want %v", tt.wantHost, got, tt.wantScopes)
+			var got []string
+			for _, scope := range auth.GetScopesForResource(ctx, tt.lookup) {
+				got = append(got, scope.String())
+			}
+			if !reflect.DeepEqual(got, tt.wantScopes) {
+				t.Errorf("GetScopesForResource(%v) = %v, want %v", tt.lookup, got, tt.wantScopes)
 			}
 		})
 	}

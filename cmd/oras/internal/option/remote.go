@@ -34,6 +34,7 @@ import (
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -448,7 +449,7 @@ func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *
 	client.TokenFetcher = auth.NewCompositeTokenFetcher(client.Client, client.Header, client.ClientID, true)
 
 	if !cred.IsEmpty() {
-		client.CredentialFunc = func(_ context.Context, _ string) (credentials.Credential, error) {
+		client.CredentialFunc = func(_ context.Context, _ properties.Resource) (credentials.Credential, error) {
 			return cred, nil
 		}
 	} else {
@@ -457,7 +458,7 @@ func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *
 		if err != nil {
 			return nil, err
 		}
-		client.CredentialFunc = remo.store.Get
+		client.CredentialFunc = remote.NewCredentialFunc(remo.store)
 	}
 
 	return

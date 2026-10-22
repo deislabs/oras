@@ -24,7 +24,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
-	github.com/oras-project/oras-go/v3 v3.0.0-rc.1
+	github.com/oras-project/oras-go/v3 v3.0.0-rc.3
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/spf13/cast v1.9.2 // indirect
 	golang.org/x/crypto v0.57.0 // indirect

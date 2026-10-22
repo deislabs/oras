@@ -25,10 +25,7 @@ import (
 // WithScopeHint adds a hinted scope to the context.
 func WithScopeHint(ctx context.Context, target any, actions ...string) context.Context {
 	if repo, ok := target.(*remote.Repository); ok {
-		scope := auth.ScopeRepository(repo.RepositoryName, actions...)
-		// The scope hint must be keyed by the request host, not the registry
-		// name: docker.io resolves to registry-1.docker.io.
-		return auth.AppendScopesForHost(ctx, repo.Reference().Host(), scope)
+		return auth.AppendRepositoryScope(ctx, repo.Reference(), actions...)
 	}
 	return ctx
 }

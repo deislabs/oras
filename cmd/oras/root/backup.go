@@ -424,7 +424,10 @@ func parseArtifactReferences(artifactRefs string) (string, []string, error) {
 		return "", nil, fmt.Errorf("digest references are not supported: %q", artifactRefs)
 	}
 	refParts := strings.Split(artifactRefs, ",")
-	mainRef := refParts[0]
+	// A trailing ':' denotes an empty tag. oras-go v3 rejects it as a missing
+	// tag, so strip it before parsing; an empty main tag combined with extra
+	// tags is still rejected below.
+	mainRef := strings.TrimSuffix(refParts[0], ":")
 	extraTags := refParts[1:]
 
 	// validate repository

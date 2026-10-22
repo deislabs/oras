@@ -151,7 +151,7 @@ func TestRemote_authClient_RawCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got, err := client.CredentialFunc(nil, "")
+	got, err := client.CredentialFunc(nil, properties.Resource{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
