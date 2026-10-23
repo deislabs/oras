@@ -39,6 +39,7 @@ import (
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/fileref"
 	"oras.land/oras/internal/contentutil"
+	"oras.land/oras/internal/repository"
 )
 
 const (
@@ -120,7 +121,7 @@ func (target *Target) Parse(cmd *cobra.Command) error {
 		return nil
 	default:
 		target.Type = TargetTypeRemote
-		ref, err := properties.NewReference(target.RawReference)
+		ref, err := repository.ParseReference(target.RawReference)
 		if err != nil {
 			return &oerrors.Error{
 				OperationType:  oerrors.OperationTypeParseArtifactReference,

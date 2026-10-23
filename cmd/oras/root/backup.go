@@ -31,7 +31,6 @@ import (
 	"github.com/oras-project/oras-go/v3/content"
 	"github.com/oras-project/oras-go/v3/content/oci"
 	"github.com/oras-project/oras-go/v3/registry"
-	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"oras.land/oras/cmd/oras/internal/argument"
@@ -44,6 +43,7 @@ import (
 	"oras.land/oras/internal/docker"
 	"oras.land/oras/internal/graph"
 	orasio "oras.land/oras/internal/io"
+	"oras.land/oras/internal/repository"
 )
 
 // outputFormat defines the format of the backup output.
@@ -431,7 +431,7 @@ func parseArtifactReferences(artifactRefs string) (string, []string, error) {
 	extraTags := refParts[1:]
 
 	// validate repository
-	parsedRepo, err := properties.NewReference(mainRef)
+	parsedRepo, err := repository.ParseReference(mainRef)
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid reference %q: %w", mainRef, err)
 	}

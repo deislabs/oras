@@ -67,5 +67,9 @@ func runLogout(cmd *cobra.Command, opts logoutOptions) error {
 	if err != nil {
 		return err
 	}
-	return remote.Logout(ctx, store, properties.Resource{Registry: opts.hostname})
+	resource, err := properties.ParseResource(opts.hostname)
+	if err != nil {
+		return err
+	}
+	return remote.Logout(ctx, store, resource)
 }

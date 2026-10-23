@@ -19,15 +19,35 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/oras-project/oras-go/v3/errdef"
 	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 )
+
+// RejectScheme returns an error if rawReference carries a URL scheme such as
+// http://, https:// or oci://. oras-go v3 silently strips these schemes, which
+// would turn http://host/repo into an HTTPS request; plain HTTP is selected
+// with --plain-http instead.
+func RejectScheme(rawReference string) error {
+	if strings.Contains(rawReference, "://") {
+		return fmt.Errorf("%w: %q: URL schemes are not supported, use --plain-http for plain HTTP registries", errdef.ErrInvalidReference, rawReference)
+	}
+	return nil
+}
+
+// ParseReference parses rawReference into a reference, rejecting URL schemes.
+func ParseReference(rawReference string) (properties.Reference, error) {
+	if err := RejectScheme(rawReference); err != nil {
+		return properties.Reference{}, err
+	}
+	return properties.NewReference(rawReference)
+}
 
 // ParseRemoteRepository extracts hostname and namespace from rawReference.
 func ParseRemoteRepository(rawReference string) (hostname, namespace string, err error) {
 	rawReference = strings.TrimSuffix(rawReference, "/")
 	if strings.Contains(rawReference, "/") {
 		var ref properties.Reference
-		ref, err = properties.NewReference(rawReference)
+		ref, err = ParseReference(rawReference)
 		if err != nil {
 			return
 		}

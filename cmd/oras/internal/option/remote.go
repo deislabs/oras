@@ -43,6 +43,7 @@ import (
 	"oras.land/oras/internal/credential"
 	"oras.land/oras/internal/crypto"
 	onet "oras.land/oras/internal/net"
+	"oras.land/oras/internal/repository"
 	"oras.land/oras/internal/trace"
 	"oras.land/oras/internal/version"
 )
@@ -516,6 +517,9 @@ func (remo *Remote) handleWarning(registry string, logger logrus.FieldLogger) fu
 
 // NewRegistry assembles a oras remote registry.
 func (remo *Remote) NewRegistry(registry string, common Common, logger logrus.FieldLogger) (reg *remote.Registry, err error) {
+	if err = repository.RejectScheme(registry); err != nil {
+		return nil, err
+	}
 	reg, err = remote.NewRegistry(registry)
 	if err != nil {
 		return nil, err
@@ -532,6 +536,9 @@ func (remo *Remote) NewRegistry(registry string, common Common, logger logrus.Fi
 
 // NewRepository assembles a oras remote repository.
 func (remo *Remote) NewRepository(reference string, common Common, logger logrus.FieldLogger) (repo *remote.Repository, err error) {
+	if err = repository.RejectScheme(reference); err != nil {
+		return nil, err
+	}
 	repo, err = remote.NewRepository(reference)
 	if err != nil {
 		if errors.Is(err, errdef.ErrInvalidReference) {

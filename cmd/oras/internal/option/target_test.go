@@ -568,3 +568,21 @@ func TestTarget_NewReadonlyTarget_remote(t *testing.T) {
 		t.Fatalf("Target.NewReadonlyTarget() = %T, want *remote.Repository", got)
 	}
 }
+
+func TestTarget_Parse_remote_scheme(t *testing.T) {
+	for _, raw := range []string{
+		"http://127.0.0.1:1/repo:tag",
+		"https://localhost:5000/repo",
+		"oci://localhost:5000/repo:tag",
+	} {
+		opts := Target{
+			RawReference: raw,
+			IsOCILayout:  false,
+		}
+		cmd := &cobra.Command{}
+		ApplyFlags(&opts, cmd.Flags())
+		if err := opts.Parse(cmd); err == nil {
+			t.Errorf("expect Target.Parse(%q) to fail but not", raw)
+		}
+	}
+}
