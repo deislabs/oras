@@ -18,9 +18,11 @@ package root
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -319,18 +321,16 @@ func doPull(ctx context.Context, src oras.ReadOnlyTarget, dst oras.GraphTarget, 
 					// empty layer
 					continue
 				}
-				if s.Annotations[ocispec.AnnotationTitle] == "" {
-					// unnamed layers are skipped
-					if err = metadataHandler.OnLayerSkipped(s); err != nil {
-						return nil, err
-					}
-				}
 				ss, err := content.Successors(ctx, fetcher, s)
 				if err != nil {
 					return nil, err
 				}
 				if len(ss) == 0 {
-					// skip s if it is unnamed AND has no successors.
+					// skip s if it is unnamed AND has no successors; unnamed
+					// manifests and indexes are still traversed, not skipped.
+					if err = metadataHandler.OnLayerSkipped(s); err != nil {
+						return nil, err
+					}
 					if err := notifyOnce(&printed, s, statusHandler.OnNodeSkipped); err != nil {
 						return nil, err
 					}
@@ -366,6 +366,14 @@ func doPull(ctx context.Context, src oras.ReadOnlyTarget, dst oras.GraphTarget, 
 					return err
 				}
 			}
+			// Restore directories recorded by recursive push. File writes
+			// create their parent directories implicitly; this is what
+			// restores empty directories.
+			if dirPath, ok := s.Annotations[descriptor.AnnotationDirectoryPath]; ok {
+				if err = restoreDirectory(po.Output, dirPath, po.PathTraversal, cleanup); err != nil {
+					return err
+				}
+			}
 		}
 		printed.Store(descriptor.GenerateContentKey(desc), true)
 		return statusHandler.OnNodeDownloaded(desc)
@@ -374,6 +382,93 @@ func doPull(ctx context.Context, src oras.ReadOnlyTarget, dst oras.GraphTarget, 
 	// Copy
 	desc, err := oras.Copy(ctx, src, po.Reference, dst, po.Reference, opts)
 	return desc, oerrors.UnwrapCopyError(err) // we don't need the CopyError information so we unwrap it here
+}
+
+// restoreDirectory creates the directory recorded in a descriptor's directory
+// path annotation under the output directory. The annotation value comes from
+// remote content, so it is held to the same path-traversal policy as file
+// names.
+func restoreDirectory(output, dirPath string, allowPathTraversal bool, cleanup *pullCleanup) error {
+	if dirPath == "" || dirPath == "." {
+		// the root of the pushed directory is the output directory itself
+		return nil
+	}
+	rel := filepath.Clean(filepath.FromSlash(dirPath))
+	target := rel
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(output, rel)
+	}
+	if !allowPathTraversal {
+		if !filepath.IsLocal(rel) {
+			return fmt.Errorf("%s: %w", dirPath, file.ErrPathTraversalDisallowed)
+		}
+		// The lexical check above does not resolve symlinks: os.MkdirAll
+		// follows them, so an existing symlink component under the output
+		// directory would redirect creation outside it. Re-check after
+		// resolving symlinks, like the file store does for file writes.
+		if err := checkDirectoryEscape(output, target); err != nil {
+			return fmt.Errorf("%s: %w", dirPath, err)
+		}
+	}
+	cleanup.track(rel)
+	return os.MkdirAll(target, 0777)
+}
+
+// checkDirectoryEscape returns file.ErrPathTraversalDisallowed if resolving
+// symlinks in target's existing ancestors causes it to escape base. It mirrors
+// the symlink-aware containment check the file store applies to file writes.
+func checkDirectoryEscape(base, target string) error {
+	// Normalize both paths to absolute before resolving symlinks: with a
+	// relative output directory, a safe absolute symlink target inside it
+	// would otherwise be compared against a relative base and filepath.Rel
+	// would report traversal.
+	base, err := filepath.Abs(base)
+	if err != nil {
+		return err
+	}
+	target, err = filepath.Abs(target)
+	if err != nil {
+		return err
+	}
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// base does not exist yet; no symlinks to follow
+			return nil
+		}
+		return err
+	}
+	// resolve symlinks in the deepest existing ancestor of target and append
+	// the non-existent components verbatim
+	realTarget := target
+	dir := target
+	var suffix string
+	for {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			realTarget = filepath.Join(resolved, suffix)
+			break
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// reached the filesystem root
+			break
+		}
+		suffix = filepath.Join(filepath.Base(dir), suffix)
+		dir = parent
+	}
+	rel, err := filepath.Rel(realBase, realTarget)
+	if err != nil {
+		return file.ErrPathTraversalDisallowed
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return file.ErrPathTraversalDisallowed
+	}
+	return nil
 }
 
 func notifyOnce(notified *sync.Map, s ocispec.Descriptor, notify func(ocispec.Descriptor) error) error {

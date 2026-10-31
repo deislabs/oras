@@ -338,3 +338,90 @@ func TestPullCleanup_TrackRoot(t *testing.T) {
 		t.Fatalf("cleanup.created = %v, want empty", cleanup.created)
 	}
 }
+
+// Test_restoreDirectory_symlinkEscape verifies that directory restoration
+// cannot escape the output directory through an existing symlink. A lexical
+// containment check alone is not enough: os.MkdirAll follows symlinks, so an
+// output directory containing "link" pointing elsewhere would let an artifact
+// with directory path "link/empty" create directories outside the output
+// directory. This mirrors the symlink-aware check the file store applies to
+// file writes.
+func Test_restoreDirectory_symlinkEscape(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(srcDir, "link", "empty"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("a"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	layoutDir := filepath.Join(t.TempDir(), "layout")
+	if err := runPushCmd(t,
+		"--oci-layout",
+		"--recursive",
+		"--preserve-empty-dirs",
+		"--disable-path-validation",
+		layoutDir+":v1",
+		srcDir,
+	); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+
+	outsideDir := t.TempDir()
+	outDir := t.TempDir()
+	if err := os.Symlink(outsideDir, filepath.Join(outDir, "link")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	err := runPullCmd(t, "--oci-layout", layoutDir+":v1", "-o", outDir)
+	if err == nil || !errors.Is(err, file.ErrPathTraversalDisallowed) {
+		t.Fatalf("got error %v, want %v", err, file.ErrPathTraversalDisallowed)
+	}
+	if _, statErr := os.Stat(filepath.Join(outsideDir, "empty")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("directory escaped the output directory: stat outside/empty = %v", statErr)
+	}
+}
+
+// Test_restoreDirectory_relativeOutputInternalSymlink verifies that a safe
+// symlink inside the output directory does not trip the escape check when the
+// output path is relative (the default "."). checkDirectoryEscape used to
+// compare a relative resolved base against an absolute resolved target, so
+// filepath.Rel failed and the pull was rejected as path traversal.
+func Test_restoreDirectory_relativeOutputInternalSymlink(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(srcDir, "link", "empty"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("a"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	layoutDir := filepath.Join(t.TempDir(), "layout")
+	if err := runPushCmd(t,
+		"--oci-layout",
+		"--recursive",
+		"--preserve-empty-dirs",
+		"--disable-path-validation",
+		layoutDir+":v1",
+		srcDir,
+	); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+
+	outDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(outDir, "real"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// absolute symlink target that stays inside the output directory
+	if err := os.Symlink(filepath.Join(outDir, "real"), filepath.Join(outDir, "link")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// pull with the default relative output "." from inside the output directory
+	t.Chdir(outDir)
+	if err := runPullCmd(t, "--oci-layout", layoutDir+":v1"); err != nil {
+		t.Fatalf("pull with relative output: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(outDir, "real", "empty"))
+	if err != nil || !info.IsDir() {
+		t.Fatalf("expected empty directory restored through internal symlink: %v", err)
+	}
+}

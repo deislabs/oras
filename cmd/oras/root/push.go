@@ -19,6 +19,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
+	"os"
 	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -36,7 +39,9 @@ import (
 	"oras.land/oras/cmd/oras/internal/fileref"
 	"oras.land/oras/cmd/oras/internal/option"
 	"oras.land/oras/internal/contentutil"
+	"oras.land/oras/internal/dir"
 	"oras.land/oras/internal/listener"
+	"oras.land/oras/internal/manifestutil"
 	"oras.land/oras/internal/registryutil"
 )
 
@@ -48,6 +53,7 @@ type pushOptions struct {
 	option.Target
 	option.Format
 	option.Terminal
+	option.Recursive
 
 	extraRefs         []string
 	manifestConfigRef string
@@ -121,6 +127,12 @@ Example - Push file "hi.txt" into an OCI image layout folder 'layout-dir' with t
 
 Example - Push file "hi.txt" into an OCI image layout folder 'layout-dir' with tag 'example.com:test':
   oras push example.com:test hi.txt --oci-layout-path layout-dir
+
+Example - [Experimental] Push a directory recursively with hierarchical manifests:
+  oras push --recursive localhost:5000/hello:v1 ./mydir
+
+Example - [Experimental] Push a directory recursively with custom max blobs per manifest:
+  oras push --recursive --max-blobs-per-manifest 500 localhost:5000/hello:v1 ./mydir
 `,
 		Args: oerrors.CheckArgs(argument.AtLeast(1), "the destination for pushing"),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -128,6 +140,12 @@ Example - Push file "hi.txt" into an OCI image layout folder 'layout-dir' with t
 			opts.RawReference = refs[0]
 			opts.extraRefs = refs[1:]
 			opts.FileRefs = args[1:]
+			// For recursive push the argument is a root directory path, not a
+			// file-as-artifact path. The directory path is never stored as an
+			// annotation title, so the absolute-path check is irrelevant.
+			if opts.Recursive.Recursive {
+				opts.PathValidationDisabled = true
+			}
 			if err := option.Parse(cmd, &opts); err != nil {
 				return err
 			}
@@ -164,10 +182,52 @@ Example - Push file "hi.txt" into an OCI image layout folder 'layout-dir' with t
 					opts.artifactType = oras.MediaTypeUnknownArtifact
 				}
 			}
+
+			// Validate recursive options
+			if err := opts.Validate(); err != nil {
+				return err
+			}
+
+			if !opts.Recursive.Recursive && cmd.Flags().Changed("max-blobs-per-manifest") {
+				return errors.New("--max-blobs-per-manifest requires --recursive")
+			}
+
+			// Recursive push has some restrictions
+			if opts.Recursive.Recursive {
+				if opts.manifestConfigRef != "" {
+					return errors.New("--config cannot be used with --recursive")
+				}
+				if opts.Platform.Platform != nil {
+					return errors.New("--artifact-platform cannot be used with --recursive")
+				}
+				if opts.Flag == option.ImageSpecV1_0 {
+					return errors.New("--image-spec v1.0 cannot be used with --recursive: hierarchical manifests require OCI image-spec v1.1")
+				}
+				if opts.artifactType != "" {
+					if err := manifestutil.ValidateMediaType(opts.artifactType); err != nil {
+						return fmt.Errorf("invalid artifact type: %w", err)
+					}
+				}
+				if len(opts.FileRefs) != 1 {
+					return errors.New("--recursive requires exactly one directory argument")
+				}
+				// Verify the argument is a directory
+				info, err := os.Stat(opts.FileRefs[0])
+				if err != nil {
+					return fmt.Errorf("cannot access %q: %w", opts.FileRefs[0], err)
+				}
+				if !info.IsDir() {
+					return fmt.Errorf("%q is not a directory; --recursive requires a directory", opts.FileRefs[0])
+				}
+			}
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts.Printer.Verbose = opts.verbose
+			if opts.Recursive.Recursive {
+				return runPushRecursive(cmd, &opts)
+			}
 			return runPush(cmd, &opts)
 		},
 	}
@@ -335,4 +395,165 @@ func pushArtifact(_ oras.Target, pack packFunc, copyFunc copyFunc) (ocispec.Desc
 		return ocispec.Descriptor{}, err
 	}
 	return root, nil
+}
+
+// runPushRecursive handles recursive directory push with hierarchical manifests.
+func runPushRecursive(cmd *cobra.Command, opts *pushOptions) error {
+	ctx, logger := command.GetLogger(cmd, &opts.Common)
+	dirPath := opts.FileRefs[0]
+
+	// Walk the directory tree
+	walkOpts := dir.WalkOptions{
+		FollowSymlinks: opts.FollowSymlinks,
+		IncludeEmpty:   opts.PreserveEmptyDirs,
+		OnSkip: func(path string) {
+			logger.Warnf("skipped symbolic link %q; use --follow-symlinks to follow symbolic links", path)
+		},
+	}
+	rootNode, err := dir.Walk(dirPath, walkOpts)
+	if err != nil {
+		return fmt.Errorf("failed to walk directory %q: %w", dirPath, err)
+	}
+
+	fileCount := rootNode.FileCount()
+	if fileCount == 0 && !opts.PreserveEmptyDirs {
+		return errors.New("directory is empty; nothing to push")
+	}
+
+	// Create file store
+	store, err := file.New("")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+
+	memoryStore := memory.New()
+	union := contentutil.MultiReadOnlyTarget(memoryStore, store)
+
+	statusHandler, metadataHandler, err := display.NewPushHandler(opts.Printer, opts.Format, opts.TTY, union)
+	if err != nil {
+		return err
+	}
+
+	// Load all files and get their descriptors
+	allFiles := dir.FlattenFiles(rootNode)
+	fileDescs := make(map[string]ocispec.Descriptor)
+
+	for _, fileNode := range allFiles {
+		// Resolve the annotated name before registering the file, like
+		// loadFiles does: the store must know the file by the name used in
+		// the descriptor, or copying fails with "not found".
+		name := fileNode.Path
+		annotations := opts.Annotations[fileNode.Path]
+		if title, ok := annotations[ocispec.AnnotationTitle]; ok {
+			name = title
+		}
+
+		if err := statusHandler.OnFileLoading(name); err != nil {
+			return err
+		}
+		desc, err := addFile(ctx, store, name, "application/octet-stream", fileNode.AbsPath)
+		if err != nil {
+			return fmt.Errorf("failed to add file %q: %w", fileNode.Path, err)
+		}
+
+		// Apply annotations if any
+		if len(annotations) > 0 {
+			if desc.Annotations == nil {
+				desc.Annotations = make(map[string]string)
+			}
+			maps.Copy(desc.Annotations, annotations)
+		}
+
+		fileDescs[fileNode.Path] = desc
+	}
+
+	// Build the manifest hierarchy
+	builder := manifestutil.NewBuilder(memoryStore, manifestutil.BuilderOptions{
+		MaxBlobsPerManifest: opts.MaxBlobsPerManifest,
+		ArtifactType:        opts.artifactType,
+		ManifestAnnotations: opts.Annotations[option.AnnotationManifest],
+		ConfigAnnotations:   opts.Annotations[option.AnnotationConfig],
+		PreserveEmptyDirs:   opts.PreserveEmptyDirs,
+	})
+
+	result, err := builder.BuildFromNode(ctx, rootNode, fileDescs)
+	if err != nil {
+		return fmt.Errorf("failed to build manifest hierarchy: %w", err)
+	}
+
+	// Tag the root in memory store so it can be resolved
+	if err := memoryStore.Tag(ctx, result.Root, result.Root.Digest.String()); err != nil {
+		return fmt.Errorf("failed to tag root: %w", err)
+	}
+
+	// Prepare destination
+	originalDst, err := opts.NewTarget(opts.Common, logger)
+	if err != nil {
+		return err
+	}
+	// Keep the unwrapped destination for scope hinting; WithScopeHint relies
+	// on a concrete *remote.Repository type assertion and would silently
+	// skip the hint if passed the TraversingTarget wrapper.
+	scopeHintDst := originalDst
+	if opts.force {
+		originalDst = &contentutil.TraversingTarget{GraphTarget: originalDst}
+	}
+	dst, stopTrack, err := statusHandler.TrackTarget(originalDst)
+	if err != nil {
+		return err
+	}
+
+	// Copy options
+	copyOptions := oras.DefaultCopyOptions
+	copyOptions.Concurrency = opts.concurrency
+	copyOptions.OnCopySkipped = statusHandler.OnCopySkipped
+	copyOptions.PreCopy = statusHandler.PreCopy
+	copyOptions.PostCopy = statusHandler.PostCopy
+
+	// Add scope hints
+	ctx = registryutil.WithScopeHint(ctx, scopeHintDst, auth.ActionPull, auth.ActionPush)
+
+	// Copy the graph
+	if tag := opts.Reference; tag == "" {
+		err = oras.CopyGraph(ctx, union, dst, result.Root, copyOptions.CopyGraphOptions)
+	} else {
+		_, err = oras.Copy(ctx, union, result.Root.Digest.String(), dst, tag, copyOptions)
+	}
+	// Stop progress tracking before rendering any summary output.
+	_ = stopTrack()
+	if err != nil {
+		return oerrors.UnwrapCopyError(err)
+	}
+
+	if err := metadataHandler.OnCopied(&opts.Target, result.Root); err != nil {
+		return err
+	}
+
+	// Handle extra tags
+	if len(opts.extraRefs) != 0 {
+		contentBytes, err := content.FetchAll(ctx, memoryStore, result.Root)
+		if err != nil {
+			return err
+		}
+		tagBytesNOpts := oras.DefaultTagBytesNOptions
+		tagBytesNOpts.Concurrency = opts.concurrency
+		tagDst := listener.NewTagListener(originalDst, nil, metadataHandler.OnTagged)
+		if _, err = oras.TagBytesN(ctx, tagDst, result.Root.MediaType, contentBytes, opts.extraRefs, tagBytesNOpts); err != nil {
+			return err
+		}
+	}
+
+	if err := metadataHandler.Render(); err != nil {
+		return err
+	}
+
+	// Print summary. Text format only: JSON and Go-template output must not
+	// be followed by extra plain text.
+	if opts.Format.Type == option.FormatTypeText.Name {
+		opts.Printer.Println("Pushed", fileCount, "files in", result.ManifestCount, "manifest(s) and", result.IndexCount, "index(es)")
+	}
+
+	// Export manifest if requested
+	return opts.ExportManifest(ctx, memoryStore, result.Root)
 }

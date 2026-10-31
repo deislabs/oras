@@ -18,6 +18,7 @@ package command
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 
@@ -770,6 +771,129 @@ var _ = Describe("OCI image layout users:", func() {
 			var manifest ocispec.Manifest
 			Expect(json.Unmarshal(fetched, &manifest)).ShouldNot(HaveOccurred())
 			Expect(manifest.Layers[0].Annotations["org.opencontainers.image.title"]).To(Equal("foobar/baz"))
+		})
+	})
+})
+
+var _ = Describe("Remote registry users:", func() {
+	When("pushing recursively with --recursive flag", func() {
+		tag := "recursive-e2e"
+
+		// buildRecursiveDir creates a temp directory with a nested structure and
+		// returns the path. The structure is:
+		//   <tmp>/
+		//     file1.txt
+		//     file2.txt
+		//     subdir/
+		//       file3.txt
+		//       nested/
+		//         file4.txt
+		buildRecursiveDir := func() (string, map[string]string) {
+			srcDir := GinkgoT().TempDir()
+			files := map[string]string{
+				"file1.txt":               "root file one\n",
+				"file2.txt":               "root file two\n",
+				"subdir/file3.txt":        "subdir file three\n",
+				"subdir/nested/file4.txt": "nested file four\n",
+			}
+			for rel, content := range files {
+				full := filepath.Join(srcDir, rel)
+				Expect(os.MkdirAll(filepath.Dir(full), 0755)).To(Succeed())
+				Expect(os.WriteFile(full, []byte(content), 0644)).To(Succeed())
+			}
+			return srcDir, files
+		}
+
+		It("should push recursively and pull back with correct file contents", func() {
+			// Regression test for https://github.com/oras-project/oras/pull/1951
+			// where oras pull failed with "open <path>: is a directory" because
+			// Image Index descriptors carried AnnotationTitle = directory name.
+			repo := pushTestRepo("recursive-roundtrip")
+			ref := RegistryRef(ZOTHost, repo, tag)
+
+			srcDir, files := buildRecursiveDir()
+
+			ORAS("push", "--recursive", ref, srcDir).
+				WithDescription("recursive push of nested directory").
+				Exec()
+
+			dstDir := GinkgoT().TempDir()
+			// The untitled child manifests must not be reported as skipped
+			// layers; the pull must complete with the "Pulled" summary.
+			ORAS("pull", ref).
+				WithWorkDir(dstDir).
+				WithDescription("pull after recursive push").
+				MatchKeyWords("Pulled ", "Digest: ").
+				Exec()
+
+			for rel, want := range files {
+				full := filepath.Join(dstDir, rel)
+				got, err := os.ReadFile(full)
+				Expect(err).NotTo(HaveOccurred(), "expected pulled file %q to exist", rel)
+				Expect(string(got)).To(Equal(want), "content mismatch for %q", rel)
+			}
+		})
+
+		It("should round-trip a flat directory without extra files", func() {
+			// Regression test: the root manifest descriptor used to carry
+			// AnnotationTitle = <directory basename>, so pulling a flat
+			// directory wrote the manifest JSON as an extra file named after
+			// the source directory.
+			repo := pushTestRepo("recursive-flat-roundtrip")
+			ref := RegistryRef(ZOTHost, repo, tag)
+
+			srcDir := filepath.Join(GinkgoT().TempDir(), "src")
+			Expect(os.MkdirAll(srcDir, 0755)).To(Succeed())
+			// "src" collides with the source directory basename
+			for _, name := range []string{"a", "src"} {
+				Expect(os.WriteFile(filepath.Join(srcDir, name), []byte(name), 0644)).To(Succeed())
+			}
+
+			ORAS("push", "--recursive", ref, srcDir).
+				WithDescription("recursive push of flat directory").
+				Exec()
+
+			dstDir := GinkgoT().TempDir()
+			ORAS("pull", ref).
+				WithWorkDir(dstDir).
+				WithDescription("pull after flat recursive push").
+				Exec()
+
+			entries, err := os.ReadDir(dstDir)
+			Expect(err).NotTo(HaveOccurred())
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			Expect(names).To(ConsistOf("a", "src"), "pull must restore exactly the pushed files")
+			for _, name := range []string{"a", "src"} {
+				got, err := os.ReadFile(filepath.Join(dstDir, name))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(got)).To(Equal(name), "content mismatch for %q", name)
+			}
+		})
+
+		It("should round-trip empty directories with --preserve-empty-dirs", func() {
+			repo := pushTestRepo("recursive-empty-dirs")
+			ref := RegistryRef(ZOTHost, repo, tag)
+
+			srcDir := GinkgoT().TempDir()
+			Expect(os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("a"), 0644)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(srcDir, "sub", "empty"), 0755)).To(Succeed())
+
+			ORAS("push", "--recursive", "--preserve-empty-dirs", ref, srcDir).
+				WithDescription("recursive push preserving empty directories").
+				Exec()
+
+			dstDir := GinkgoT().TempDir()
+			ORAS("pull", ref).
+				WithWorkDir(dstDir).
+				WithDescription("pull after recursive push with empty directories").
+				Exec()
+
+			info, err := os.Stat(filepath.Join(dstDir, "sub", "empty"))
+			Expect(err).NotTo(HaveOccurred(), "expected empty directory to be restored")
+			Expect(info.IsDir()).To(BeTrue())
 		})
 	})
 })
