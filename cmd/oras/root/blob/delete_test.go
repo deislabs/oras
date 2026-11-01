@@ -20,12 +20,18 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/cobra"
 	"oras.land/oras-go/v2/errdef"
 
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
 	"oras.land/oras/cmd/oras/internal/option"
+)
+
+var (
+	testBlobDigest    = digest.FromString("blob").String()
+	missingBlobDigest = digest.FromString("missing").String()
 )
 
 type fakeBlobDeleter struct {
@@ -36,7 +42,7 @@ type fakeBlobDeleter struct {
 
 func (f *fakeBlobDeleter) Resolve(context.Context, string) (ocispec.Descriptor, error) {
 	return ocispec.Descriptor{
-		Digest: "sha256:1234",
+		Digest: digest.Digest(testBlobDigest),
 	}, f.resolveErr
 }
 
@@ -49,8 +55,8 @@ var _ option.ResolvableDeleter = (*fakeBlobDeleter)(nil)
 
 func Test_doDeleteBlob_blobMissing(t *testing.T) {
 	opts := &deleteBlobOptions{}
-	opts.Reference = "sha256:missing"
-	opts.RawReference = "example.com/repo@sha256:missing"
+	opts.Reference = missingBlobDigest
+	opts.RawReference = "example.com/repo@" + missingBlobDigest
 	opts.Force = true
 
 	recorder := &displaytest.CallRecorder{}
@@ -90,8 +96,8 @@ func Test_deleteBlob_invalidTargetType(t *testing.T) {
 
 func Test_doDeleteBlob_deleted(t *testing.T) {
 	opts := &deleteBlobOptions{}
-	opts.Reference = "sha256:1234"
-	opts.RawReference = "example.com/repo@sha256:1234"
+	opts.Reference = testBlobDigest
+	opts.RawReference = "example.com/repo@" + testBlobDigest
 	opts.Force = true
 
 	recorder := &displaytest.CallRecorder{}
