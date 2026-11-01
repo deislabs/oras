@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -255,20 +256,37 @@ func (remo *Remote) parseResolve(baseDial onet.DialFunc) (onet.DialFunc, error) 
 	return dialer.DialContext, nil
 }
 
-// tlsConfig assembles the tls config.
-func (remo *Remote) tlsConfig() (*tls.Config, error) {
+// tlsConfig assembles the tls config. Settings from transport, resolved from
+// the containers configuration, are merged with the flags: the flags add CA
+// certificates and replace the client certificate.
+func (remo *Remote) tlsConfig(transport *properties.Transport) (*tls.Config, error) {
 	config := &tls.Config{
 		InsecureSkipVerify: remo.Insecure,
 	}
+	var caFiles []string
+	certFile, keyFile := remo.CertFilePath, remo.KeyFilePath
+	if transport != nil {
+		config.InsecureSkipVerify = config.InsecureSkipVerify || transport.Insecure
+		if transport.CACert != "" {
+			caFiles = append(caFiles, transport.CACert)
+		}
+		caFiles = append(caFiles, transport.CACerts...)
+		if certFile == "" && keyFile == "" {
+			certFile, keyFile = transport.Cert, transport.Key
+		}
+	}
 	if remo.CACertFilePath != "" {
+		caFiles = append(caFiles, remo.CACertFilePath)
+	}
+	if len(caFiles) != 0 {
 		var err error
-		config.RootCAs, err = crypto.LoadCertPool(remo.CACertFilePath)
+		config.RootCAs, err = crypto.LoadCertPool(caFiles...)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if remo.CertFilePath != "" && remo.KeyFilePath != "" {
-		cert, err := tls.LoadX509KeyPair(remo.CertFilePath, remo.KeyFilePath)
+	if certFile != "" && keyFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, err
 		}
@@ -356,7 +374,18 @@ func splitAuthority(authority, defaultPort string) (host, port string) {
 
 // authClient assembles a oras auth client.
 func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *auth.Client, err error) {
-	config, err := remo.tlsConfig()
+	return remo.authClientWithProperties(registry, plainHTTP, debug, nil, nil)
+}
+
+// authClientWithProperties assembles a oras auth client, applying the
+// registry properties and credential fallback resolved from the containers
+// configuration when they are not nil.
+func (remo *Remote) authClientWithProperties(registry string, plainHTTP, debug bool, props *properties.Registry, fallbackStore credentials.Store) (client *auth.Client, err error) {
+	var transportProps *properties.Transport
+	if props != nil {
+		transportProps = &props.Transport
+	}
+	config, err := remo.tlsConfig(transportProps)
 	if err != nil {
 		return nil, err
 	}
@@ -448,6 +477,15 @@ func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *
 	// which is the only flow some registries implement. Set after SetUserAgent
 	// so the fetcher captures the populated header.
 	client.TokenFetcher = auth.NewCompositeTokenFetcher(client.Client, client.Header, client.ClientID, true)
+	if props != nil {
+		if props.Attributes.TokenFlow == properties.TokenFlowOAuth2 {
+			// registries.conf asked for the OAuth2 flow without a fallback.
+			fetcher := auth.NewCompositeTokenFetcher(client.Client, client.Header, client.ClientID, false)
+			fetcher.StrictOAuth2 = true
+			client.TokenFetcher = fetcher
+		}
+		client.BlockedRealmPrefixes = slices.Clone(props.Attributes.BlockedRealmPrefixes)
+	}
 
 	if !cred.IsEmpty() {
 		client.CredentialFunc = func(_ context.Context, _ properties.Resource) (credentials.Credential, error) {
@@ -459,7 +497,11 @@ func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *
 		if err != nil {
 			return nil, err
 		}
-		client.CredentialFunc = remote.NewCredentialFunc(remo.store)
+		store := remo.store
+		if fallbackStore != nil {
+			store = credentials.NewStoreWithFallbacks(remo.store, fallbackStore)
+		}
+		client.CredentialFunc = remote.NewCredentialFunc(store)
 	}
 
 	return
@@ -520,6 +562,9 @@ func (remo *Remote) NewRegistry(registry string, common Common, logger logrus.Fi
 	if err = repository.RejectScheme(registry); err != nil {
 		return nil, err
 	}
+	if containersConfigEnabled() {
+		return remo.newConfiguredRegistry(registry, common, logger)
+	}
 	reg, err = remote.NewRegistry(registry)
 	if err != nil {
 		return nil, err
@@ -538,6 +583,9 @@ func (remo *Remote) NewRegistry(registry string, common Common, logger logrus.Fi
 func (remo *Remote) NewRepository(reference string, common Common, logger logrus.FieldLogger) (repo *remote.Repository, err error) {
 	if err = repository.RejectScheme(reference); err != nil {
 		return nil, err
+	}
+	if containersConfigEnabled() {
+		return remo.newConfiguredRepository(reference, common, logger)
 	}
 	repo, err = remote.NewRepository(reference)
 	if err != nil {
