@@ -245,14 +245,12 @@ var _ = Describe("1.1 registry users:", func() {
 			toDeleteRef := RegistryRef(ZOTHost, dstRepo, foobar.FooBlobDigest)
 			ORAS("blob", "delete", toDeleteRef, "--force", "--descriptor").MatchContent(foobar.FooBlobDescriptor).Exec()
 		})
-
 		It("should return success when deleting a non-existent blob with force flag set", func() {
 			toDeleteRef := RegistryRef(ZOTHost, ImageRepo, invalidDigest)
 			ORAS("blob", "delete", toDeleteRef, "--force").
 				MatchKeyWords("Missing", toDeleteRef).
 				Exec()
 		})
-
 		It("should show deprecation message when running with --verbose flag", func() {
 			dstRepo := fmt.Sprintf(repoFmt, "delete", "blob-delete-verbose")
 			CopyZOTRepo(BlobRepo, dstRepo)
@@ -345,6 +343,17 @@ var _ = Describe("OCI image layout users:", func() {
 				MatchKeyWords("Missing", toDeleteRef).
 				Exec()
 		})
+		It("should fail to delete a manifest when a tag is provided instead of a digest", func() {
+			root := PrepareTempOCI(ImageRepo)
+			ref := LayoutRef(root, foobar.Tag)
+
+			ORAS("blob", "delete", Flags.Layout, ref, "--force").
+				ExpectFailure().
+				MatchErrKeyWords("no digest specified").
+				Exec()
+
+			ORAS("manifest", "fetch", Flags.Layout, ref).Exec()
+		})
 	})
 
 	When("running `blob fetch`", func() {
@@ -357,6 +366,15 @@ var _ = Describe("OCI image layout users:", func() {
 			root := PrepareTempOCI(ImageRepo)
 			ORAS("blob", "fetch", Flags.Layout, LayoutRef(root, foobar.FooBlobDigest), "--output", "-").
 				MatchContent(foobar.FooBlobContent).Exec()
+		})
+		It("should fail if a tag is provided instead of a digest", func() {
+			root := PrepareTempOCI(ImageRepo)
+			ref := LayoutRef(root, foobar.Tag)
+
+			ORAS("blob", "fetch", Flags.Layout, ref, "--output", "-").
+				ExpectFailure().
+				MatchErrKeyWords("no digest specified").
+				Exec()
 		})
 		It("should fetch blob content and output to a file", func() {
 			root := PrepareTempOCI(ImageRepo)

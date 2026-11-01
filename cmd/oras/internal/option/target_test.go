@@ -447,3 +447,55 @@ func TestTarget_ModifyError_dockerHint(t *testing.T) {
 		})
 	}
 }
+
+func TestTarget_EnsureReferenceNotEmpty(t *testing.T) {
+	tests := []struct {
+		name      string
+		reference string
+		allowTag  bool
+		wantErr   bool
+	}{
+		{
+			name:      "reject tag when digest is required",
+			reference: "test",
+			allowTag:  false,
+			wantErr:   true,
+		},
+		{
+			name:      "accept digest when digest is required",
+			reference: "sha256:" + strings.Repeat("a", 64),
+			allowTag:  false,
+			wantErr:   false,
+		},
+		{
+			name:      "accept tag when tags are allowed",
+			reference: "test",
+			allowTag:  true,
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := Target{
+				RawReference: "localhost:5000/repo:" + tt.reference,
+				Reference:    tt.reference,
+			}
+
+			rootCmd := &cobra.Command{Use: "oras"}
+			blobCmd := &cobra.Command{Use: "blob"}
+			fetchCmd := &cobra.Command{Use: "fetch"}
+
+			rootCmd.AddCommand(blobCmd)
+			blobCmd.AddCommand(fetchCmd)
+
+			err := target.EnsureReferenceNotEmpty(fetchCmd, tt.allowTag)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("EnsureReferenceNotEmpty() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && tt.wantErr && !strings.Contains(err.Error(), "no digest specified") {
+				t.Errorf("EnsureReferenceNotEmpty() error = %v, want digest error", err)
+			}
+		})
+	}
+}
