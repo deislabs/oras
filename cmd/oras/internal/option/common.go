@@ -16,6 +16,7 @@ limitations under the License.
 package option
 
 import (
+	"context"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -24,10 +25,17 @@ import (
 	"oras.land/oras/cmd/oras/internal/output"
 )
 
-// authCacheStore holds auth caches scoped to a single command invocation,
-// keyed by credential identity. It lets clients with the same credentials share
-// a cache (the intent of #1923) while keeping clients with different
-// credentials, or different invocations, isolated.
+type authCacheContextKey struct{}
+
+// WithSharedAuthCache allows multiple command executions using the returned
+// context to reuse authentication tokens when credentials are unchanged.
+// Use a new context when credentials change or cache isolation is required.
+func WithSharedAuthCache(ctx context.Context) context.Context {
+	return context.WithValue(ctx, authCacheContextKey{}, newAuthCacheStore())
+}
+
+// authCacheStore holds auth caches keyed by credential identity. A fresh store
+// is used for each invocation unless the caller explicitly opts into reuse.
 type authCacheStore struct {
 	mu     sync.Mutex
 	caches map[credentialIdentity]auth.Cache
@@ -65,8 +73,12 @@ func (opts *Common) ApplyFlags(fs *pflag.FlagSet) {
 // Parse gets target options from user input.
 func (opts *Common) Parse(cmd *cobra.Command) error {
 	opts.Printer = output.NewPrinter(cmd.OutOrStdout(), cmd.OutOrStderr())
-	// Parse runs once per command execution, so a fresh store isolates
-	// re-executions of the same command object.
+	// Reset on each execution, including re-executions of the same command.
 	opts.authCaches = newAuthCacheStore()
+	if ctx := cmd.Context(); ctx != nil {
+		if shared, ok := ctx.Value(authCacheContextKey{}).(*authCacheStore); ok {
+			opts.authCaches = shared
+		}
+	}
 	return nil
 }

@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/retry"
@@ -329,6 +330,31 @@ func TestRemote_authClient_SharedCacheWiring(t *testing.T) {
 	}
 	if newCache(t, common, Remote{Username: "user-a", Secret: "password-a"}) == newCache(t, common, Remote{Username: "user-b", Secret: "password-b"}) {
 		t.Fatal("expected clients with different credentials not to share a cache")
+	}
+}
+
+func TestRemote_ensureAuthCaches_Reexecution(t *testing.T) {
+	cmd := &cobra.Command{}
+	common := Common{}
+	remote := Remote{}
+	if err := common.Parse(cmd); err != nil {
+		t.Fatal(err)
+	}
+	remote.ensureAuthCaches(common)
+	first := remote.authCaches
+	if first == nil {
+		t.Fatal("expected initial auth cache store")
+	}
+	if err := common.Parse(cmd); err != nil {
+		t.Fatal(err)
+	}
+	remote.ensureAuthCaches(common)
+	if remote.authCaches == first || remote.authCaches != common.authCaches {
+		t.Fatal("expected remote to bind to the new invocation's store")
+	}
+	remote.ensureAuthCaches(Common{})
+	if remote.authCaches != common.authCaches {
+		t.Fatal("missing common store must not reset the remote cache")
 	}
 }
 

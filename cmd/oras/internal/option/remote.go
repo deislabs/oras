@@ -47,9 +47,9 @@ import (
 )
 
 // ensureAuthCaches binds the remote to the auth cache store of the current
-// command invocation, creating a local store when none is available.
+// command invocation, if one is available.
 func (remo *Remote) ensureAuthCaches(common Common) {
-	if remo.authCaches == nil {
+	if common.authCaches != nil {
 		remo.authCaches = common.authCaches
 	}
 }

@@ -16,11 +16,21 @@ limitations under the License.
 package root
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
+	"oras.land/oras/cmd/oras/internal/option"
 	"oras.land/oras/cmd/oras/root/blob"
 	"oras.land/oras/cmd/oras/root/manifest"
 	"oras.land/oras/cmd/oras/root/repo"
 )
+
+// WithSharedAuthCache returns a context that allows embedded ORAS commands
+// to reuse authentication tokens across executions. Pass it to ExecuteContext
+// for each command. Create a new context when registry credentials change.
+func WithSharedAuthCache(ctx context.Context) context.Context {
+	return option.WithSharedAuthCache(ctx)
+}
 
 func New() *cobra.Command {
 	cmd := &cobra.Command{
