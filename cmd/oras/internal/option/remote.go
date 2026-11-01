@@ -46,33 +46,12 @@ import (
 	"oras.land/oras/internal/version"
 )
 
-var (
-	// sharedCaches holds auth caches that are reused across command executions
-	// in the same process to avoid re-authentication. Caches are keyed by
-	// credential identity, because auth.Cache itself is keyed only by registry
-	// and scope: clients with different credentials must not share tokens.
-	sharedCaches     = map[credentialIdentity]auth.Cache{}
-	sharedCachesLock sync.Mutex
-)
-
-// sharedCache returns the auth cache shared by all clients with the given
-// credential identity, creating it if needed.
-func sharedCache(identity credentialIdentity) auth.Cache {
-	sharedCachesLock.Lock()
-	defer sharedCachesLock.Unlock()
-	cache, ok := sharedCaches[identity]
-	if !ok {
-		cache = auth.NewCache()
-		sharedCaches[identity] = cache
+// ensureAuthCaches binds the remote to the auth cache store of the current
+// command invocation, creating a local store when none is available.
+func (remo *Remote) ensureAuthCaches(common Common) {
+	if remo.authCaches == nil {
+		remo.authCaches = common.authCaches
 	}
-	return cache
-}
-
-// clearSharedCaches removes all shared auth caches.
-func clearSharedCaches() {
-	sharedCachesLock.Lock()
-	defer sharedCachesLock.Unlock()
-	clear(sharedCaches)
 }
 
 // credentialIdentity identifies the credential source of a client. Static
@@ -124,6 +103,7 @@ type Remote struct {
 	warned                map[string]*sync.Map
 	plainHTTP             func() (plainHTTP bool, enforced bool)
 	store                 credentials.Store
+	authCaches            *authCacheStore
 }
 
 // EnableDistributionSpecFlag set distribution specification flag as applicable.
@@ -443,7 +423,10 @@ func (remo *Remote) authClient(registry string, plainHTTP, debug bool) (client *
 	}
 
 	cred := remo.Credential()
-	cache := sharedCache(newCredentialIdentity(cred, remo.Configs))
+	if remo.authCaches == nil {
+		remo.authCaches = newAuthCacheStore()
+	}
+	cache := remo.authCaches.cache(newCredentialIdentity(cred, remo.Configs))
 
 	client = &auth.Client{
 		Client: &http.Client{
@@ -534,6 +517,7 @@ func (remo *Remote) NewRegistry(registry string, common Common, logger logrus.Fi
 	registry = reg.Reference.Registry
 	reg.PlainHTTP = remo.isPlainHTTP(registry)
 	reg.HandleWarning = remo.handleWarning(registry, logger)
+	remo.ensureAuthCaches(common)
 	if reg.Client, err = remo.authClient(reg.Reference.Host(), reg.PlainHTTP, common.Debug); err != nil {
 		return nil, err
 	}
@@ -552,6 +536,7 @@ func (remo *Remote) NewRepository(reference string, common Common, logger logrus
 	registry := repo.Reference.Registry
 	repo.PlainHTTP = remo.isPlainHTTP(registry)
 	repo.HandleWarning = remo.handleWarning(registry, logger)
+	remo.ensureAuthCaches(common)
 	if repo.Client, err = remo.authClient(repo.Reference.Host(), repo.PlainHTTP, common.Debug); err != nil {
 		return nil, err
 	}

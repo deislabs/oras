@@ -1991,6 +1991,103 @@ func Test_copyCmd_platformSelection(t *testing.T) {
 	}
 }
 
+func Test_copyCmd_usesDestinationCredentials(t *testing.T) {
+	const (
+		fromUser = "from-user"
+		fromPass = "from-pass"
+		toUser   = "to-user"
+		toPass   = "to-pass"
+	)
+	var destinationAuthenticated atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v2/from/"):
+			if !ok {
+				w.Header().Set("WWW-Authenticate", `Basic realm="from"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			if user != fromUser || pass != fromPass {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			switch {
+			case strings.Contains(r.URL.Path, "/manifests/") && (r.Method == http.MethodHead || r.Method == http.MethodGet):
+				w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+				w.Header().Set("Content-Length", fmt.Sprint(len(manifestContent)))
+				w.WriteHeader(http.StatusOK)
+				if r.Method == http.MethodGet {
+					_, _ = w.Write(manifestContent)
+				}
+			case strings.HasSuffix(r.URL.Path, "/blobs/"+configDigest) && (r.Method == http.MethodHead || r.Method == http.MethodGet):
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Length", fmt.Sprint(len(configContent)))
+				w.WriteHeader(http.StatusOK)
+				if r.Method == http.MethodGet {
+					_, _ = w.Write(configContent)
+				}
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		case strings.HasPrefix(r.URL.Path, "/v2/to/"):
+			if !ok {
+				w.Header().Set("WWW-Authenticate", `Basic realm="to"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			if user != toUser || pass != toPass {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			destinationAuthenticated.Store(true)
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/blobs/"+configDigest) && r.Method == http.MethodHead:
+				w.WriteHeader(http.StatusNotFound)
+			case strings.HasSuffix(r.URL.Path, "/blobs/uploads/") && r.Method == http.MethodPost:
+				w.Header().Set("Location", "/v2/to/blobs/uploads/test-upload")
+				w.WriteHeader(http.StatusAccepted)
+			case strings.HasSuffix(r.URL.Path, "/blobs/uploads/test-upload") && r.Method == http.MethodPut:
+				w.WriteHeader(http.StatusCreated)
+			case strings.Contains(r.URL.Path, "/manifests/") && r.Method == http.MethodHead:
+				w.WriteHeader(http.StatusNotFound)
+			case strings.Contains(r.URL.Path, "/manifests/") && r.Method == http.MethodPut:
+				w.WriteHeader(http.StatusCreated)
+			case strings.Contains(r.URL.Path, "/manifests/") && r.Method == http.MethodGet:
+				w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+				w.Header().Set("Content-Length", fmt.Sprint(len(manifestContent)))
+				_, _ = w.Write(manifestContent)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cmd := copyCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--from-plain-http", "--to-plain-http",
+		"--from-username", fromUser, "--from-password", fromPass,
+		"--to-username", toUser, "--to-password", toPass,
+		u.Host + "/from@" + manifestDigest,
+		u.Host + "/to:test-tag",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("copy command failed: %v", err)
+	}
+	if !destinationAuthenticated.Load() {
+		t.Fatal("destination never authenticated with the configured credentials")
+	}
+}
+
 func Test_copyCmd_invalidExtraTag(t *testing.T) {
 	cmd := copyCmd()
 	cmd.SetArgs([]string{
