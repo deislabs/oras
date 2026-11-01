@@ -24,68 +24,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-	"oras.land/oras/cmd/oras/internal/display/metadata/text"
-	"oras.land/oras/cmd/oras/internal/option"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras/cmd/oras/internal/display/displaytest"
 )
 
-type recordingRepoListHandler struct {
-	calls []string
-	err   error
-}
-
-func (h *recordingRepoListHandler) OnRepositoryListed(repo string) error {
-	h.calls = append(h.calls, repo)
-	return h.err
-}
-
-func (h *recordingRepoListHandler) Render() error {
-	h.calls = append(h.calls, "Render")
-	return nil
-}
-
-func TestNewRepoListHandler_injected(t *testing.T) {
-	want := &recordingRepoListHandler{}
-	got, err := newRepoListHandler(&repositoryOptions{}, "registry.example", want)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatal("newRepoListHandler() did not return injected handler")
-	}
-}
-
-func TestNewRepoListHandler_default(t *testing.T) {
-	opts := &repositoryOptions{Format: option.Format{Type: option.FormatTypeText.Name}}
-	got, err := newRepoListHandler(opts, "registry.example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotType, wantType := reflect.TypeOf(got), reflect.TypeOf(text.NewRepoListHandler(nil, "")); gotType != wantType {
-		t.Errorf("handler type = %v, want %v", gotType, wantType)
-	}
-}
-
-func TestNewRepoListHandler_invalidFormat(t *testing.T) {
-	_, err := newRepoListHandler(&repositoryOptions{Format: option.Format{Type: "invalid"}}, "registry.example")
-	if err == nil {
-		t.Fatal("newRepoListHandler() error = nil, want invalid format error")
-	}
-}
-
-func TestEmitRepositories_filtersAndStopsOnError(t *testing.T) {
+func Test_emitRepositories_filtersAndStopsOnError(t *testing.T) {
 	wantedErr := errors.New("listing failed")
-	handler := &recordingRepoListHandler{err: wantedErr}
-	err := emitRepositories([]string{"example/a", "other/b"}, "example/", handler)
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingRepoListHandler{Recorder: recorder, RepositoryListedErr: wantedErr}
+	err := emitRepositories([]string{"other/b", "example/a", "example/c"}, "example/", handler)
 	if !errors.Is(err, wantedErr) {
 		t.Fatalf("emitRepositories() error = %v, want %v", err, wantedErr)
 	}
-	if got, want := handler.calls, []string{"example/a"}; !reflect.DeepEqual(got, want) {
+	if got, want := recorder.Snapshot(), []string{"OnRepositoryListed:example/a"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("handler calls = %v, want %v", got, want)
 	}
 }
 
-func TestListRepository_injectedHandler(t *testing.T) {
+func newCatalogTestRegistry(t *testing.T) *remote.Registry {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v2/_catalog" {
 			http.NotFound(w, r)
@@ -93,20 +50,34 @@ func TestListRepository_injectedHandler(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{"repositories":["example/a","other/b"]}`))
 	}))
-	defer server.Close()
-	host := strings.TrimPrefix(server.URL, "http://")
-	opts := &repositoryOptions{hostname: host, namespace: "example/"}
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	opts.Remote.ApplyFlags(cmd.Flags())
-	if err := cmd.Flags().Set("plain-http", "true"); err != nil {
+	t.Cleanup(server.Close)
+	reg, err := remote.NewRegistry(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	handler := &recordingRepoListHandler{}
-	if err := listRepository(cmd, opts, handler); err != nil {
+	reg.PlainHTTP = true
+	return reg
+}
+
+func Test_doListRepository_handlerCalls(t *testing.T) {
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingRepoListHandler{Recorder: recorder}
+	if err := doListRepository(context.Background(), newCatalogTestRegistry(t), "", "example/", handler); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := handler.calls, []string{"example/a", "Render"}; !reflect.DeepEqual(got, want) {
+	if got, want := recorder.Snapshot(), []string{"OnRepositoryListed:example/a", "Render"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("handler calls = %v, want %v", got, want)
+	}
+}
+
+func Test_doListRepository_handlerErrorSkipsRender(t *testing.T) {
+	wantedErr := errors.New("listing failed")
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingRepoListHandler{Recorder: recorder, RepositoryListedErr: wantedErr}
+	if err := doListRepository(context.Background(), newCatalogTestRegistry(t), "", "", handler); !errors.Is(err, wantedErr) {
+		t.Fatalf("doListRepository() error = %v, want %v", err, wantedErr)
+	}
+	if got, want := recorder.Snapshot(), []string{"OnRepositoryListed:example/a"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("handler calls = %v, want %v", got, want)
 	}
 }

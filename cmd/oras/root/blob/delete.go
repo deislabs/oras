@@ -76,32 +76,25 @@ Example - Delete a blob and print its descriptor:
 	return oerrors.Command(cmd, &opts.Target)
 }
 
-func deleteBlob(cmd *cobra.Command, opts *deleteBlobOptions, injected ...metadata.BlobDeleteHandler) (err error) {
+func deleteBlob(cmd *cobra.Command, opts *deleteBlobOptions) (err error) {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	blobs, err := opts.NewBlobDeleter(opts.Common, logger)
 	if err != nil {
 		return err
 	}
 
-	return deleteBlobWithDeleter(ctx, cmd, opts, blobs, injected...)
+	return doDeleteBlob(ctx, cmd, opts, blobs, display.NewBlobDeleteHandler(opts.Printer, &opts.Target))
 }
 
-func deleteBlobWithDeleter(
+func doDeleteBlob(
 	ctx context.Context,
 	cmd *cobra.Command,
 	opts *deleteBlobOptions,
 	blobs option.ResolvableDeleter,
-	injected ...metadata.BlobDeleteHandler,
+	metadataHandler metadata.BlobDeleteHandler,
 ) error {
 	if err := opts.EnsureReferenceNotEmpty(cmd, false); err != nil {
 		return err
-	}
-
-	var metadataHandler metadata.BlobDeleteHandler
-	if len(injected) == 1 {
-		metadataHandler = injected[0]
-	} else {
-		metadataHandler = display.NewBlobDeleteHandler(opts.Printer, &opts.Target)
 	}
 
 	// add both pull and delete scope hints for dst repository to save potential delete-scope token requests during deleting

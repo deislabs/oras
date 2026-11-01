@@ -32,15 +32,13 @@ import (
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/memory"
+	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
-	"oras.land/oras/cmd/oras/internal/display/metadata/text"
-	"oras.land/oras/cmd/oras/internal/display/status"
 )
 
 func TestParseArtifactReferences(t *testing.T) {
@@ -209,49 +207,66 @@ func TestParseArtifactReferences(t *testing.T) {
 	}
 }
 
-func TestNewBackupHandlers_injected(t *testing.T) {
-	wantStatus := &mockBackupHandler{}
-	wantMetadata := &mockBackupHandler{}
-	got := newBackupHandlers(&backupOptions{}, nil, backupHandlers{status: wantStatus, metadata: wantMetadata})
-	if got.status != wantStatus || got.metadata != wantMetadata {
-		t.Fatal("newBackupHandlers() did not return injected handlers")
+func newBackupTestSource(t *testing.T) oras.GraphTarget {
+	t.Helper()
+	src := memory.New()
+	desc, err := oras.PackManifest(context.Background(), src, oras.PackManifestVersion1_1, "application/example", oras.PackManifestOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
+	if err := src.Tag(context.Background(), desc, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	return src
 }
 
-func TestNewBackupHandlers_default(t *testing.T) {
-	got := newBackupHandlers(&backupOptions{repository: "example/repo"}, nil)
-	if reflect.TypeOf(got.status) != reflect.TypeOf(status.NewTextBackupHandler(nil, nil)) {
-		t.Errorf("status handler type = %T, want text backup handler", got.status)
-	}
-	if reflect.TypeOf(got.metadata) != reflect.TypeOf(text.NewBackupHandler("example/repo", nil)) {
-		t.Errorf("metadata handler type = %T, want text backup handler", got.metadata)
-	}
-}
-
-func TestRunBackup_injectedHandlers_reportsSourceError(t *testing.T) {
+func Test_doBackup_handlerCalls(t *testing.T) {
 	ctx := context.Background()
-	opts := &backupOptions{
-		output:       t.TempDir(),
-		outputFormat: outputFormatDir,
-		repository:   "localhost:5000/example",
-		tags:         []string{"missing"},
+	dstRoot := t.TempDir()
+	dst, err := oci.New(dstRoot)
+	if err != nil {
+		t.Fatal(err)
 	}
-
+	opts := &backupOptions{output: dstRoot, outputFormat: outputFormatDir, repository: "example", tags: []string{"v1"}}
 	recorder := &displaytest.CallRecorder{}
-	handlers := backupHandlers{
-		status:   &displaytest.RecordingBackupStatusHandler{Recorder: recorder},
-		metadata: &displaytest.RecordingBackupMetadataHandler{Recorder: recorder},
+	statusHandler := &displaytest.RecordingBackupStatusHandler{Recorder: recorder}
+	metadataHandler := &displaytest.RecordingBackupMetadataHandler{Recorder: recorder}
+
+	if err := doBackup(ctx, opts, logrus.New(), newBackupTestSource(t), dst, dstRoot, time.Now(), statusHandler, metadataHandler); err != nil {
+		t.Fatal(err)
 	}
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(ctx)
-	opts.Remote.ApplyFlags(cmd.Flags())
-
-	if err := runBackup(cmd, opts, handlers); err == nil {
-		t.Fatal("runBackup() error = nil, want source repository error")
+	calls := recorder.Snapshot()
+	if len(calls) < 5 {
+		t.Fatalf("handler calls = %v, want at least 5", calls)
 	}
-	if got := recorder.Snapshot(); len(got) != 0 {
-		t.Fatalf("handler calls = %v, want no calls when source resolution fails", got)
+	if got, want := calls[:2], []string{"OnTagsFound", "StartTracking"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("first handler calls = %v, want %v", got, want)
+	}
+	if got, want := calls[len(calls)-3:], []string{"StopTracking", "OnArtifactPulled", "OnBackupCompleted"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("last handler calls = %v, want %v", got, want)
+	}
+}
+
+func Test_doBackup_tagsFoundError(t *testing.T) {
+	ctx := context.Background()
+	dstRoot := t.TempDir()
+	dst, err := oci.New(dstRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := &backupOptions{output: dstRoot, outputFormat: outputFormatDir, repository: "example", tags: []string{"v1"}}
+	wantErr := errors.New("tags found failed")
+	recorder := &displaytest.CallRecorder{}
+	statusHandler := &displaytest.RecordingBackupStatusHandler{Recorder: recorder}
+	metadataHandler := &displaytest.RecordingBackupMetadataHandler{Recorder: recorder, TagsFoundErr: wantErr}
+
+	err = doBackup(ctx, opts, logrus.New(), newBackupTestSource(t), dst, dstRoot, time.Now(), statusHandler, metadataHandler)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("doBackup() error = %v, want %v", err, wantErr)
+	}
+	if got, want := recorder.Snapshot(), []string{"OnTagsFound"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("handler calls = %v, want %v", got, want)
 	}
 }
 

@@ -26,12 +26,9 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/spf13/cobra"
 	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/oci"
+	"oras.land/oras-go/v2/content/memory"
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
-	"oras.land/oras/cmd/oras/internal/display/metadata/tree"
-	"oras.land/oras/cmd/oras/internal/option"
 )
 
 // cyclicReferrerTarget is a minimal ReadOnlyGraphTarget that serves a
@@ -59,28 +56,6 @@ func (t *cyclicReferrerTarget) Predecessors(context.Context, ocispec.Descriptor)
 
 func (t *cyclicReferrerTarget) Resolve(context.Context, string) (ocispec.Descriptor, error) {
 	return ocispec.Descriptor{}, errors.New("not implemented")
-}
-
-func TestNewDiscoverHandler_injected(t *testing.T) {
-	want := &displaytest.RecordingDiscoverHandler{Recorder: &displaytest.CallRecorder{}}
-	got, err := newDiscoverHandler(&discoverOptions{}, ocispec.Descriptor{}, want)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatal("newDiscoverHandler() did not return injected handler")
-	}
-}
-
-func TestNewDiscoverHandler_default(t *testing.T) {
-	opts := &discoverOptions{Format: option.Format{Type: option.FormatTypeTree.Name}}
-	got, err := newDiscoverHandler(opts, ocispec.Descriptor{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reflect.TypeOf(got) != reflect.TypeOf(tree.NewDiscoverHandler(nil, "", ocispec.Descriptor{}, false, nil)) {
-		t.Errorf("handler type = %T, want tree handler", got)
-	}
 }
 
 func TestFetchAllReferrers_CyclicGraphTerminates(t *testing.T) {
@@ -141,29 +116,45 @@ func TestDiscoverCmd_OutputDeprecationMessage(t *testing.T) {
 	}
 }
 
-func TestRunDiscover_injectedHandler(t *testing.T) {
+func Test_doDiscover_handlerCalls(t *testing.T) {
 	ctx := context.Background()
-	layout := t.TempDir()
-	store, err := oci.New(layout)
+	store := memory.New()
+	subject, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, "application/example", oras.PackManifestOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	desc, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, "application/example", oras.PackManifestOptions{})
-	if err != nil {
+	if _, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, "application/example.referrer", oras.PackManifestOptions{Subject: &subject}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Tag(ctx, desc, "source"); err != nil {
-		t.Fatal(err)
-	}
-	opts := &discoverOptions{Target: option.Target{Type: option.TargetTypeOCILayout, Path: layout, Reference: "source"}}
 	recorder := &displaytest.CallRecorder{}
 	handler := &displaytest.RecordingDiscoverHandler{Recorder: recorder}
-	cmd := &cobra.Command{}
-	cmd.SetContext(ctx)
-	if err := runDiscover(cmd, opts, handler); err != nil {
+
+	if err := doDiscover(ctx, store, subject, "", 0, handler); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := recorder.Snapshot(), []string{"Render"}; !reflect.DeepEqual(got, want) {
+	if got, want := recorder.Snapshot(), []string{"OnDiscovered", "Render"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("handler calls = %v, want %v", got, want)
+	}
+}
+
+func Test_doDiscover_handlerErrorSkipsRender(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	subject, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, "application/example", oras.PackManifestOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, "application/example.referrer", oras.PackManifestOptions{Subject: &subject}); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("discover handler failed")
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingDiscoverHandler{Recorder: recorder, Err: wantErr}
+
+	if err := doDiscover(ctx, store, subject, "", 0, handler); !errors.Is(err, wantErr) {
+		t.Fatalf("doDiscover() error = %v, want %v", err, wantErr)
+	}
+	if got, want := recorder.Snapshot(), []string{"OnDiscovered"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("handler calls = %v, want %v", got, want)
 	}
 }

@@ -18,75 +18,97 @@ package root
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
+	"time"
 
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/spf13/cobra"
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/memory"
+	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
-	"oras.land/oras/cmd/oras/internal/display/metadata/text"
-	"oras.land/oras/cmd/oras/internal/display/status"
+	orasio "oras.land/oras/internal/io"
 )
 
-func TestNewRestoreHandlers_injected(t *testing.T) {
-	opts := &restoreOptions{}
-	recorder := &displaytest.CallRecorder{}
-	want := restoreHandlers{
-		status:   &displaytest.RecordingRestoreStatusHandler{Recorder: recorder},
-		metadata: &displaytest.RecordingRestoreMetadataHandler{Recorder: recorder},
-	}
-	got := newRestoreHandlers(opts, nil, want)
-	if got.status != want.status || got.metadata != want.metadata {
-		t.Fatalf("newRestoreHandlers() did not return injected handlers")
-	}
-}
-
-func TestNewRestoreHandlers_default(t *testing.T) {
-	opts := &restoreOptions{}
-	got := newRestoreHandlers(opts, nil)
-	if got.status == nil || got.metadata == nil {
-		t.Fatal("newRestoreHandlers() returned nil handler")
-	}
-	if reflect.TypeOf(got.status) != reflect.TypeOf(status.NewTextRestoreHandler(nil, nil)) {
-		t.Errorf("status handler type = %T, want text restore handler", got.status)
-	}
-	if reflect.TypeOf(got.metadata) != reflect.TypeOf(text.NewRestoreHandler(nil, false)) {
-		t.Errorf("metadata handler type = %T, want text restore handler", got.metadata)
-	}
-}
-
-func TestRecordingRestoreHandlers_callOrderAndError(t *testing.T) {
-	wantedErr := errors.New("pre-copy failed")
-	recorder := &displaytest.CallRecorder{}
-	statusHandler := &displaytest.RecordingRestoreStatusHandler{Recorder: recorder, PreCopyErr: wantedErr}
-	metadataHandler := &displaytest.RecordingRestoreMetadataHandler{Recorder: recorder}
-
-	if err := metadataHandler.OnTagsFound([]string{"tag"}); err != nil {
+func newRestoreTestTar(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	layoutDir := t.TempDir()
+	layout, err := oci.New(layoutDir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := statusHandler.PreCopy(context.Background(), ocispec.Descriptor{}); !errors.Is(err, wantedErr) {
-		t.Fatalf("PreCopy() error = %v, want %v", err, wantedErr)
+	desc, err := oras.PackManifest(ctx, layout, oras.PackManifestVersion1_1, "application/example", oras.PackManifestOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, want := recorder.Snapshot(), []string{"OnTagsFound", "PreCopy"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("handler calls = %v, want %v", got, want)
+	if err := layout.Tag(ctx, desc, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	tarPath := filepath.Join(t.TempDir(), "backup.tar")
+	tarFile, err := os.Create(tarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tarFile.Close() }()
+	if err := orasio.TarDirectory(tarFile, layoutDir); err != nil {
+		t.Fatal(err)
+	}
+	return tarPath
+}
+
+func Test_doRestore_handlerCalls(t *testing.T) {
+	opts := &restoreOptions{input: newRestoreTestTar(t), repository: "example"}
+	recorder := &displaytest.CallRecorder{}
+	statusHandler := &displaytest.RecordingRestoreStatusHandler{Recorder: recorder}
+	metadataHandler := &displaytest.RecordingRestoreMetadataHandler{Recorder: recorder}
+
+	if err := doRestore(context.Background(), opts, memory.New(), time.Now(), statusHandler, metadataHandler); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := recorder.Snapshot()
+	if len(calls) < 6 {
+		t.Fatalf("handler calls = %v, want at least 6", calls)
+	}
+	if got, want := calls[:3], []string{"OnTarLoaded", "OnTagsFound", "StartTracking"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("first handler calls = %v, want %v", got, want)
+	}
+	if got, want := calls[len(calls)-3:], []string{"StopTracking", "OnArtifactPushed", "OnRestoreCompleted"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("last handler calls = %v, want %v", got, want)
 	}
 }
 
-func TestRunRestore_injectedHandlers_reportsInputError(t *testing.T) {
-	ctx := context.Background()
+func Test_doRestore_dryRun(t *testing.T) {
+	opts := &restoreOptions{input: newRestoreTestTar(t), repository: "example", dryRun: true}
 	recorder := &displaytest.CallRecorder{}
-	opts := &restoreOptions{repository: "localhost:5000/example", input: t.TempDir() + "/missing"}
-	handlers := restoreHandlers{
-		status:   &displaytest.RecordingRestoreStatusHandler{Recorder: recorder},
-		metadata: &displaytest.RecordingRestoreMetadataHandler{Recorder: recorder},
+	statusHandler := &displaytest.RecordingRestoreStatusHandler{Recorder: recorder}
+	metadataHandler := &displaytest.RecordingRestoreMetadataHandler{Recorder: recorder}
+
+	if err := doRestore(context.Background(), opts, memory.New(), time.Now(), statusHandler, metadataHandler); err != nil {
+		t.Fatal(err)
 	}
-	cmd := &cobra.Command{}
-	cmd.SetContext(ctx)
-	opts.Remote.ApplyFlags(cmd.Flags())
-	if err := runRestore(cmd, opts, handlers); err == nil {
-		t.Fatal("runRestore() error = nil, want input path error")
+
+	want := []string{"OnTarLoaded", "OnTagsFound", "OnArtifactPushed", "OnRestoreCompleted"}
+	if got := recorder.Snapshot(); !reflect.DeepEqual(got, want) {
+		t.Errorf("handler calls = %v, want %v", got, want)
 	}
-	if got := recorder.Snapshot(); len(got) != 0 {
-		t.Fatalf("handler calls = %v, want no calls when input validation fails", got)
+}
+
+func Test_doRestore_artifactPushedError(t *testing.T) {
+	opts := &restoreOptions{input: newRestoreTestTar(t), repository: "example"}
+	wantErr := errors.New("artifact pushed failed")
+	recorder := &displaytest.CallRecorder{}
+	statusHandler := &displaytest.RecordingRestoreStatusHandler{Recorder: recorder}
+	metadataHandler := &displaytest.RecordingRestoreMetadataHandler{Recorder: recorder, ArtifactPushedErr: wantErr}
+
+	err := doRestore(context.Background(), opts, memory.New(), time.Now(), statusHandler, metadataHandler)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("doRestore() error = %v, want %v", err, wantErr)
+	}
+	if calls := recorder.Snapshot(); slices.Contains(calls, "OnRestoreCompleted") {
+		t.Errorf("handler calls = %v, want no OnRestoreCompleted after an error", calls)
 	}
 }

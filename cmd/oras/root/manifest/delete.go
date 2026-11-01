@@ -80,32 +80,25 @@ Example - Delete a manifest by digest 'sha256:99e4703fbf30916f549cd6bfa9cdbab614
 	return oerrors.Command(cmd, &opts.Target)
 }
 
-func deleteManifest(cmd *cobra.Command, opts *deleteOptions, injected ...metadata.ManifestDeleteHandler) error {
+func deleteManifest(cmd *cobra.Command, opts *deleteOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	manifests, err := opts.NewManifestDeleter(opts.Common, logger)
 	if err != nil {
 		return err
 	}
 
-	return deleteManifestWithDeleter(ctx, cmd, opts, manifests, injected...)
+	return doDeleteManifest(ctx, cmd, opts, manifests, display.NewManifestDeleteHandler(opts.Printer, &opts.Target))
 }
 
-func deleteManifestWithDeleter(
+func doDeleteManifest(
 	ctx context.Context,
 	cmd *cobra.Command,
 	opts *deleteOptions,
 	manifests option.ResolvableDeleter,
-	injected ...metadata.ManifestDeleteHandler,
+	metadataHandler metadata.ManifestDeleteHandler,
 ) error {
 	if err := opts.EnsureReferenceNotEmpty(cmd, true); err != nil {
 		return err
-	}
-
-	var metadataHandler metadata.ManifestDeleteHandler
-	if len(injected) == 1 {
-		metadataHandler = injected[0]
-	} else {
-		metadataHandler = display.NewManifestDeleteHandler(opts.Printer, &opts.Target)
 	}
 
 	// add both pull and delete scope hints for dst repository to save potential delete-scope token requests during deleting

@@ -55,18 +55,6 @@ type pushOptions struct {
 	verbose bool
 }
 
-type manifestPushHandlers struct {
-	status   status.ManifestPushHandler
-	metadata metadata.ManifestPushHandler
-}
-
-func newManifestPushHandlers(opts pushOptions, desc ocispec.Descriptor, injected ...manifestPushHandlers) (status.ManifestPushHandler, metadata.ManifestPushHandler) {
-	if len(injected) == 1 {
-		return injected[0].status, injected[0].metadata
-	}
-	return display.NewManifestPushHandler(opts.Printer, opts.OutputDescriptor, opts.Pretty.Pretty, desc, &opts.Target)
-}
-
 func pushCmd() *cobra.Command {
 	var opts pushOptions
 	cmd := &cobra.Command{
@@ -137,7 +125,7 @@ Example - Push a manifest to an OCI image layout folder 'layout-dir' and tag wit
 	return oerrors.Command(cmd, &opts.Target)
 }
 
-func pushManifest(cmd *cobra.Command, opts pushOptions, injected ...manifestPushHandlers) error {
+func pushManifest(cmd *cobra.Command, opts pushOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	var target oras.Target
 	var err error
@@ -173,8 +161,20 @@ func pushManifest(cmd *cobra.Command, opts pushOptions, injected ...manifestPush
 
 	// prepare manifest descriptor
 	desc := content.NewDescriptorFromBytes(mediaType, contentBytes)
-	statusHandler, metadataHandler := newManifestPushHandlers(opts, desc, injected...)
+	statusHandler, metadataHandler := display.NewManifestPushHandler(opts.Printer, opts.OutputDescriptor, opts.Pretty.Pretty, desc, &opts.Target)
+	return doPushManifest(ctx, opts, target, mediaType, contentBytes, desc, statusHandler, metadataHandler)
+}
 
+func doPushManifest(
+	ctx context.Context,
+	opts pushOptions,
+	target oras.Target,
+	mediaType string,
+	contentBytes []byte,
+	desc ocispec.Descriptor,
+	statusHandler status.ManifestPushHandler,
+	metadataHandler metadata.ManifestPushHandler,
+) error {
 	ref := opts.Reference
 	if ref == "" {
 		ref = desc.Digest.String()

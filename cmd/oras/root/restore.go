@@ -28,7 +28,6 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry"
-	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
@@ -53,19 +52,6 @@ type restoreOptions struct {
 	// derived options
 	repository string
 	tags       []string
-}
-
-type restoreHandlers struct {
-	status   status.RestoreHandler
-	metadata metadata.RestoreHandler
-}
-
-func newRestoreHandlers(opts *restoreOptions, dstRepo *remote.Repository, injected ...restoreHandlers) restoreHandlers {
-	if len(injected) == 1 {
-		return injected[0]
-	}
-	statusHandler, metadataHandler := display.NewRestoreHandler(opts.Printer, opts.TTY, dstRepo, opts.dryRun)
-	return restoreHandlers{status: statusHandler, metadata: metadataHandler}
 }
 
 func restoreCmd() *cobra.Command {
@@ -143,7 +129,7 @@ Example - Set custom concurrency level:
 	return oerrors.Command(cmd, &opts.Remote)
 }
 
-func runRestore(cmd *cobra.Command, opts *restoreOptions, injected ...restoreHandlers) error {
+func runRestore(cmd *cobra.Command, opts *restoreOptions) error {
 	if opts.input == "" {
 		return errors.New("the input path cannot be empty")
 	}
@@ -155,10 +141,18 @@ func runRestore(cmd *cobra.Command, opts *restoreOptions, injected ...restoreHan
 	if err != nil {
 		return fmt.Errorf("failed to prepare target repository %q: %w", opts.repository, err)
 	}
-	handlers := newRestoreHandlers(opts, dstRepo, injected...)
-	statusHandler := handlers.status
-	metadataHandler := handlers.metadata
+	statusHandler, metadataHandler := display.NewRestoreHandler(opts.Printer, opts.TTY, dstRepo, opts.dryRun)
+	return doRestore(ctx, opts, dstRepo, startTime, statusHandler, metadataHandler)
+}
 
+func doRestore(
+	ctx context.Context,
+	opts *restoreOptions,
+	dstRepo oras.GraphTarget,
+	startTime time.Time,
+	statusHandler status.RestoreHandler,
+	metadataHandler metadata.RestoreHandler,
+) error {
 	// prepare the source OCI store
 	var srcOCI oras.ReadOnlyGraphTarget
 	fi, err := os.Stat(opts.input)

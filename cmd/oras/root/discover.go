@@ -47,13 +47,6 @@ type discoverOptions struct {
 	verbose bool
 }
 
-func newDiscoverHandler(opts *discoverOptions, desc ocispec.Descriptor, injected ...metadata.DiscoverHandler) (metadata.DiscoverHandler, error) {
-	if len(injected) == 1 {
-		return injected[0], nil
-	}
-	return display.NewDiscoverHandler(opts.Printer, opts.Format, opts.Path, opts.RawReference, desc, opts.verbose, opts.TTY)
-}
-
 func discoverCmd() *cobra.Command {
 	var opts discoverOptions
 	cmd := &cobra.Command{
@@ -139,7 +132,7 @@ Example - Discover referrers of the manifest tagged 'example.com:v1' in an OCI i
 	return oerrors.Command(cmd, &opts.Target)
 }
 
-func runDiscover(cmd *cobra.Command, opts *discoverOptions, injected ...metadata.DiscoverHandler) error {
+func runDiscover(cmd *cobra.Command, opts *discoverOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	repo, err := opts.NewReadonlyTarget(ctx, opts.Common, logger)
 	if err != nil {
@@ -157,11 +150,15 @@ func runDiscover(cmd *cobra.Command, opts *discoverOptions, injected ...metadata
 		return err
 	}
 
-	handler, err := newDiscoverHandler(opts, desc, injected...)
+	handler, err := display.NewDiscoverHandler(opts.Printer, opts.Format, opts.Path, opts.RawReference, desc, opts.verbose, opts.TTY)
 	if err != nil {
 		return err
 	}
-	if err := fetchAllReferrers(ctx, repo, desc, opts.artifactType, handler, opts.depth, make(map[digest.Digest]bool)); err != nil {
+	return doDiscover(ctx, repo, desc, opts.artifactType, opts.depth, handler)
+}
+
+func doDiscover(ctx context.Context, repo oras.ReadOnlyGraphTarget, desc ocispec.Descriptor, artifactType string, depth int, handler metadata.DiscoverHandler) error {
+	if err := fetchAllReferrers(ctx, repo, desc, artifactType, handler, depth, make(map[digest.Digest]bool)); err != nil {
 		return err
 	}
 	return handler.Render()

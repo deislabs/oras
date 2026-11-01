@@ -294,6 +294,7 @@ func doPushCommand(
 		// add both pull and push scope hints for dst repository
 		// to save potential push-scope token requests during copy
 		ctx = registryutil.WithScopeHint(ctx, scopeHintDst, auth.ActionPull, auth.ActionPush)
+
 		if tag := opts.Reference; tag == "" {
 			err = oras.CopyGraph(ctx, union, dst, root, copyOptions.CopyGraphOptions)
 		} else {

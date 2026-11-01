@@ -53,22 +53,6 @@ type attachOptions struct {
 	verbose bool
 }
 
-type attachHandlers struct {
-	status   status.AttachHandler
-	metadata metadata.AttachHandler
-}
-
-func newAttachHandlers(opts *attachOptions, fetcher content.Fetcher, injected ...attachHandlers) (attachHandlers, error) {
-	if len(injected) == 1 {
-		return injected[0], nil
-	}
-	statusHandler, metadataHandler, err := display.NewAttachHandler(opts.Printer, opts.Format, opts.TTY, fetcher)
-	if err != nil {
-		return attachHandlers{}, err
-	}
-	return attachHandlers{status: statusHandler, metadata: metadataHandler}, nil
-}
-
 func attachCmd() *cobra.Command {
 	var opts attachOptions
 	cmd := &cobra.Command{
@@ -170,7 +154,7 @@ func buildAttachPackOpts(opts *attachOptions, subject ocispec.Descriptor, descs 
 	}
 }
 
-func runAttach(cmd *cobra.Command, opts *attachOptions, injected ...attachHandlers) error {
+func runAttach(cmd *cobra.Command, opts *attachOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	if len(opts.FileRefs) == 0 && len(opts.Annotations[option.AnnotationManifest]) == 0 {
 		return &oerrors.Error{
@@ -200,12 +184,14 @@ func runAttach(cmd *cobra.Command, opts *attachOptions, injected ...attachHandle
 	if err != nil {
 		return fmt.Errorf("failed to resolve %s: %w", opts.Reference, err)
 	}
-	handlers, err := newAttachHandlers(opts, store, injected...)
+	statusHandler, metadataHandler, err := display.NewAttachHandler(opts.Printer, opts.Format, opts.TTY, store)
 	if err != nil {
 		return err
 	}
-	statusHandler := handlers.status
-	metadataHandler := handlers.metadata
+	return doAttach(ctx, opts, store, dst, subject, statusHandler, metadataHandler)
+}
+
+func doAttach(ctx context.Context, opts *attachOptions, store *file.Store, dst oras.GraphTarget, subject ocispec.Descriptor, statusHandler status.AttachHandler, metadataHandler metadata.AttachHandler) error {
 	descs, err := loadFiles(ctx, store, opts.Annotations, opts.FileRefs, statusHandler)
 	if err != nil {
 		return err

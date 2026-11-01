@@ -16,11 +16,13 @@ limitations under the License.
 package repo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
@@ -37,13 +39,6 @@ type repositoryOptions struct {
 	hostname  string
 	namespace string
 	last      string
-}
-
-func newRepoListHandler(opts *repositoryOptions, registryName string, injected ...metadata.RepoListHandler) (metadata.RepoListHandler, error) {
-	if len(injected) == 1 {
-		return injected[0], nil
-	}
-	return display.NewRepoListHandler(opts.Printer, opts.Format, registryName, opts.namespace)
 }
 
 func emitRepositories(repos []string, namespace string, handler metadata.RepoListHandler) error {
@@ -101,25 +96,29 @@ Example - [Experimental] List the repositories under the registry using the give
 	return oerrors.Command(cmd, &opts.Remote)
 }
 
-func listRepository(cmd *cobra.Command, opts *repositoryOptions, injected ...metadata.RepoListHandler) error {
+func listRepository(cmd *cobra.Command, opts *repositoryOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	reg, err := opts.NewRegistry(opts.hostname, opts.Common, logger)
 	if err != nil {
 		return err
 	}
 
-	handler, err := newRepoListHandler(opts, reg.Reference.Registry, injected...)
+	handler, err := display.NewRepoListHandler(opts.Printer, opts.Format, reg.Reference.Registry, opts.namespace)
 	if err != nil {
 		return err
 	}
-	err = reg.Repositories(ctx, opts.last, func(repos []string) error {
-		return emitRepositories(repos, opts.namespace, handler)
+	return doListRepository(ctx, reg, opts.last, opts.namespace, handler)
+}
+
+func doListRepository(ctx context.Context, reg *remote.Registry, last, namespace string, handler metadata.RepoListHandler) error {
+	err := reg.Repositories(ctx, last, func(repos []string) error {
+		return emitRepositories(repos, namespace, handler)
 	})
 
 	if err != nil {
 		var repoErr error
-		if opts.namespace != "" {
-			repoErr = fmt.Errorf("could not list repositories for %q with prefix %q", reg.Reference.Host(), opts.namespace)
+		if namespace != "" {
+			repoErr = fmt.Errorf("could not list repositories for %q with prefix %q", reg.Reference.Host(), namespace)
 		} else {
 			repoErr = fmt.Errorf("could not list repositories for %q", reg.Reference.Host())
 		}

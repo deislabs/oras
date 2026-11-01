@@ -42,13 +42,6 @@ type tagOptions struct {
 	targetRefs  []string
 }
 
-func newTagHandler(opts *tagOptions, injected ...metadata.TagHandler) metadata.TagHandler {
-	if len(injected) == 1 {
-		return injected[0]
-	}
-	return display.NewTagHandler(opts.Printer, opts.Target)
-}
-
 func tagCmd() *cobra.Command {
 	var opts tagOptions
 	cmd := &cobra.Command{
@@ -110,7 +103,7 @@ Example - Tag the manifest 'v1.0.1' to 'v1.0.2' in an OCI image layout folder 'l
 	return oerrors.Command(cmd, &opts.Target)
 }
 
-func tagManifest(cmd *cobra.Command, opts *tagOptions, injected ...metadata.TagHandler) error {
+func tagManifest(cmd *cobra.Command, opts *tagOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	target, err := opts.NewTarget(opts.Common, logger)
 	if err != nil {
@@ -127,11 +120,11 @@ func tagManifest(cmd *cobra.Command, opts *tagOptions, injected ...metadata.TagH
 
 	tagNOpts := oras.DefaultTagNOptions
 	tagNOpts.Concurrency = opts.concurrency
-	tagHandler := newTagHandler(opts, injected...)
-	return tagWithHandler(ctx, target, opts.Reference, opts.targetRefs, tagNOpts, tagHandler)
+	tagHandler := display.NewTagHandler(opts.Printer, opts.Target)
+	return doTag(ctx, target, opts.Reference, opts.targetRefs, tagNOpts, tagHandler)
 }
 
-func tagWithHandler(ctx context.Context, target oras.Target, reference string, targetRefs []string, opts oras.TagNOptions, handler metadata.TagHandler) error {
+func doTag(ctx context.Context, target oras.Target, reference string, targetRefs []string, opts oras.TagNOptions, handler metadata.TagHandler) error {
 	tagListener := listener.NewTagListener(target, handler.OnTagging, handler.OnTagged)
 	_, err := oras.TagN(
 		ctx,

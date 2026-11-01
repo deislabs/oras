@@ -74,19 +74,6 @@ type backupOptions struct {
 	tags         []string
 }
 
-type backupHandlers struct {
-	status   status.BackupHandler
-	metadata metadata.BackupHandler
-}
-
-func newBackupHandlers(opts *backupOptions, fetcher content.Fetcher, injected ...backupHandlers) backupHandlers {
-	if len(injected) == 1 {
-		return injected[0]
-	}
-	statusHandler, metadataHandler := display.NewBackupHandler(opts.Printer, opts.TTY, opts.repository, fetcher)
-	return backupHandlers{status: statusHandler, metadata: metadataHandler}
-}
-
 func backupCmd() *cobra.Command {
 	var opts backupOptions
 	cmd := &cobra.Command{
@@ -166,7 +153,7 @@ Example - Set custom concurrency level:
 	return oerrors.Command(cmd, &opts.Remote)
 }
 
-func runBackup(cmd *cobra.Command, opts *backupOptions, injected ...backupHandlers) error {
+func runBackup(cmd *cobra.Command, opts *backupOptions) error {
 	if opts.output == "" {
 		return errors.New("the output path cannot be empty")
 	}
@@ -218,10 +205,21 @@ func runBackup(cmd *cobra.Command, opts *backupOptions, injected ...backupHandle
 	if err != nil {
 		return fmt.Errorf("failed to prepare OCI store for backup: %w", err)
 	}
-	handlers := newBackupHandlers(opts, dstOCI, injected...)
-	statusHandler := handlers.status
-	metadataHandler := handlers.metadata
+	statusHandler, metadataHandler := display.NewBackupHandler(opts.Printer, opts.TTY, opts.repository, dstOCI)
+	return doBackup(ctx, opts, logger, srcRepo, dstOCI, dstRoot, startTime, statusHandler, metadataHandler)
+}
 
+func doBackup(
+	ctx context.Context,
+	opts *backupOptions,
+	logger logrus.FieldLogger,
+	srcRepo oras.ReadOnlyGraphTarget,
+	dstOCI oras.GraphTarget,
+	dstRoot string,
+	startTime time.Time,
+	statusHandler status.BackupHandler,
+	metadataHandler metadata.BackupHandler,
+) error {
 	// Resolve tags to back up
 	tags, roots, err := resolveTags(ctx, srcRepo, opts.tags)
 	if err != nil {

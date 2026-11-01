@@ -17,13 +17,14 @@ package manifest
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/cobra"
 	"oras.land/oras-go/v2/errdef"
 
-	"oras.land/oras/cmd/oras/internal/display/metadata"
+	"oras.land/oras/cmd/oras/internal/display/displaytest"
 	"oras.land/oras/cmd/oras/internal/option"
 )
 
@@ -44,35 +45,19 @@ func (f *testManifestDeleteDeleter) Delete(context.Context, ocispec.Descriptor) 
 	return f.deleteErr
 }
 
-type testRecordingManifestDeleteHandler struct {
-	missingCalls int
-	deletedCalls int
-	missingErr   error
-}
-
-func (h *testRecordingManifestDeleteHandler) OnManifestMissing() error {
-	h.missingCalls++
-	return h.missingErr
-}
-
-func (h *testRecordingManifestDeleteHandler) OnManifestDeleted() error {
-	h.deletedCalls++
-	return nil
-}
-
 var _ option.ResolvableDeleter = (*testManifestDeleteDeleter)(nil)
-var _ metadata.ManifestDeleteHandler = (*testRecordingManifestDeleteHandler)(nil)
 
-func Test_deleteManifestWithDeleter_manifestMissing(t *testing.T) {
+func Test_doDeleteManifest_manifestMissing(t *testing.T) {
 	opts := &deleteOptions{}
 	opts.Reference = "sha256:missing"
 	opts.RawReference = "example.com/repo@sha256:missing"
 	opts.Force = true
 
-	handler := &testRecordingManifestDeleteHandler{}
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingManifestDeleteHandler{Recorder: recorder}
 	deleter := &testManifestDeleteDeleter{resolveErr: errdef.ErrNotFound}
 
-	err := deleteManifestWithDeleter(
+	err := doDeleteManifest(
 		context.Background(),
 		&cobra.Command{},
 		opts,
@@ -80,13 +65,10 @@ func Test_deleteManifestWithDeleter_manifestMissing(t *testing.T) {
 		handler,
 	)
 	if err != nil {
-		t.Fatalf("deleteManifestWithDeleter() error = %v, want nil", err)
+		t.Fatalf("doDeleteManifest() error = %v, want nil", err)
 	}
-	if handler.missingCalls != 1 {
-		t.Errorf("OnManifestMissing() calls = %d, want 1", handler.missingCalls)
-	}
-	if handler.deletedCalls != 0 {
-		t.Errorf("OnManifestDeleted() calls = %d, want 0", handler.deletedCalls)
+	if got, want := recorder.Snapshot(), []string{"OnManifestMissing"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("handler calls = %v, want %v", got, want)
 	}
 }
 
@@ -106,16 +88,17 @@ func Test_deleteManifest_invalidTargetType(t *testing.T) {
 	}
 }
 
-func Test_deleteManifestWithDeleter_deleted(t *testing.T) {
+func Test_doDeleteManifest_deleted(t *testing.T) {
 	opts := &deleteOptions{}
 	opts.Reference = "sha256:1234"
 	opts.RawReference = "example.com/repo@sha256:1234"
 	opts.Force = true
 
-	handler := &testRecordingManifestDeleteHandler{}
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingManifestDeleteHandler{Recorder: recorder}
 	deleter := &testManifestDeleteDeleter{}
 
-	err := deleteManifestWithDeleter(
+	err := doDeleteManifest(
 		context.Background(),
 		&cobra.Command{},
 		opts,
@@ -123,15 +106,12 @@ func Test_deleteManifestWithDeleter_deleted(t *testing.T) {
 		handler,
 	)
 	if err != nil {
-		t.Fatalf("deleteManifestWithDeleter() error = %v, want nil", err)
+		t.Fatalf("doDeleteManifest() error = %v, want nil", err)
 	}
 	if !deleter.deleted {
 		t.Fatal("Delete() was not called")
 	}
-	if handler.deletedCalls != 1 {
-		t.Errorf("OnManifestDeleted() calls = %d, want 1", handler.deletedCalls)
-	}
-	if handler.missingCalls != 0 {
-		t.Errorf("OnManifestMissing() calls = %d, want 0", handler.missingCalls)
+	if got, want := recorder.Snapshot(), []string{"OnManifestDeleted"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("handler calls = %v, want %v", got, want)
 	}
 }

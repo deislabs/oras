@@ -16,6 +16,7 @@ limitations under the License.
 package repo
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -38,13 +39,6 @@ type showTagsOptions struct {
 
 	last             string
 	excludeDigestTag bool
-}
-
-func newRepoTagsHandler(opts *showTagsOptions, injected ...metadata.RepoTagsHandler) (metadata.RepoTagsHandler, error) {
-	if len(injected) == 1 {
-		return injected[0], nil
-	}
-	return display.NewRepoTagsHandler(opts.Printer, opts.Format)
 }
 
 func showTagsCmd() *cobra.Command {
@@ -102,7 +96,7 @@ Example - [Experimental] Show tags of a specific repository in OCI layout:
 	return oerrors.Command(cmd, &opts.Target)
 }
 
-func showTags(cmd *cobra.Command, opts *showTagsOptions, injected ...metadata.RepoTagsHandler) error {
+func showTags(cmd *cobra.Command, opts *showTagsOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	finder, err := opts.NewReadonlyTarget(ctx, opts.Common, logger)
 	if err != nil {
@@ -133,11 +127,15 @@ func showTags(cmd *cobra.Command, opts *showTagsOptions, injected ...metadata.Re
 		logger.Warnf("[Experimental] querying tags associated to %s, it may take a while...\n", targetDigest)
 	}
 
-	handler, err := newRepoTagsHandler(opts, injected...)
+	handler, err := display.NewRepoTagsHandler(opts.Printer, opts.Format)
 	if err != nil {
 		return err
 	}
-	err = finder.Tags(ctx, opts.last, func(tags []string) error {
+	return doShowTags(ctx, finder, opts, targetPrefix, targetDigest, handler)
+}
+
+func doShowTags(ctx context.Context, finder option.ReadOnlyGraphTagFinderTarget, opts *showTagsOptions, targetPrefix, targetDigest string, handler metadata.RepoTagsHandler) error {
+	err := finder.Tags(ctx, opts.last, func(tags []string) error {
 		for _, tag := range tags {
 			// if --oci-layout-path is used with a repository path, filter the
 			// tags under the repository.

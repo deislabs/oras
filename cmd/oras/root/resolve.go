@@ -37,13 +37,6 @@ type resolveOptions struct {
 	fullRef bool
 }
 
-func newResolveHandler(opts *resolveOptions, injected ...metadata.ResolveHandler) metadata.ResolveHandler {
-	if len(injected) == 1 {
-		return injected[0]
-	}
-	return display.NewResolveHandler(opts.Printer, opts.fullRef, opts.Path)
-}
-
 func resolveCmd() *cobra.Command {
 	var opts resolveOptions
 
@@ -72,7 +65,7 @@ Example - Resolve digest of the target artifact:
 	return oerrors.Command(cmd, &opts.Target)
 }
 
-func runResolve(cmd *cobra.Command, opts *resolveOptions, injected ...metadata.ResolveHandler) error {
+func runResolve(cmd *cobra.Command, opts *resolveOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 	repo, err := opts.NewReadonlyTarget(ctx, opts.Common, logger)
 	if err != nil {
@@ -81,13 +74,13 @@ func runResolve(cmd *cobra.Command, opts *resolveOptions, injected ...metadata.R
 	if err := opts.EnsureReferenceNotEmpty(cmd, true); err != nil {
 		return err
 	}
-	metadataHandler := newResolveHandler(opts, injected...)
+	metadataHandler := display.NewResolveHandler(opts.Printer, opts.fullRef, opts.Path)
 	resolveOpts := oras.DefaultResolveOptions
 	resolveOpts.TargetPlatform = opts.Platform.Platform
-	return resolveWithHandler(ctx, repo, opts.Reference, resolveOpts, metadataHandler)
+	return doResolve(ctx, repo, opts.Reference, resolveOpts, metadataHandler)
 }
 
-func resolveWithHandler(ctx context.Context, repo oras.ReadOnlyTarget, reference string, opts oras.ResolveOptions, handler metadata.ResolveHandler) error {
+func doResolve(ctx context.Context, repo oras.ReadOnlyTarget, reference string, opts oras.ResolveOptions, handler metadata.ResolveHandler) error {
 	desc, err := oras.Resolve(ctx, repo, reference, opts)
 	if err != nil {
 		return fmt.Errorf("failed to resolve digest: %w", err)

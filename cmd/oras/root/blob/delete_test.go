@@ -25,7 +25,6 @@ import (
 	"oras.land/oras-go/v2/errdef"
 
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
-	"oras.land/oras/cmd/oras/internal/display/metadata"
 	"oras.land/oras/cmd/oras/internal/option"
 )
 
@@ -47,9 +46,8 @@ func (f *fakeBlobDeleter) Delete(context.Context, ocispec.Descriptor) error {
 }
 
 var _ option.ResolvableDeleter = (*fakeBlobDeleter)(nil)
-var _ metadata.BlobDeleteHandler = (*displaytest.RecordingBlobDeleteHandler)(nil)
 
-func Test_deleteBlobWithDeleter_blobMissing(t *testing.T) {
+func Test_doDeleteBlob_blobMissing(t *testing.T) {
 	opts := &deleteBlobOptions{}
 	opts.Reference = "sha256:missing"
 	opts.RawReference = "example.com/repo@sha256:missing"
@@ -59,7 +57,7 @@ func Test_deleteBlobWithDeleter_blobMissing(t *testing.T) {
 	handler := &displaytest.RecordingBlobDeleteHandler{Recorder: recorder}
 	deleter := &fakeBlobDeleter{resolveErr: errdef.ErrNotFound}
 
-	err := deleteBlobWithDeleter(
+	err := doDeleteBlob(
 		context.Background(),
 		&cobra.Command{},
 		opts,
@@ -67,7 +65,7 @@ func Test_deleteBlobWithDeleter_blobMissing(t *testing.T) {
 		handler,
 	)
 	if err != nil {
-		t.Fatalf("deleteBlobWithDeleter() error = %v, want nil", err)
+		t.Fatalf("doDeleteBlob() error = %v, want nil", err)
 	}
 	if got, want := recorder.Snapshot(), []string{"OnBlobMissing"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("handler calls = %v, want %v", got, want)
@@ -90,7 +88,7 @@ func Test_deleteBlob_invalidTargetType(t *testing.T) {
 	}
 }
 
-func Test_deleteBlobWithDeleter_deleted(t *testing.T) {
+func Test_doDeleteBlob_deleted(t *testing.T) {
 	opts := &deleteBlobOptions{}
 	opts.Reference = "sha256:1234"
 	opts.RawReference = "example.com/repo@sha256:1234"
@@ -100,7 +98,7 @@ func Test_deleteBlobWithDeleter_deleted(t *testing.T) {
 	handler := &displaytest.RecordingBlobDeleteHandler{Recorder: recorder}
 	deleter := &fakeBlobDeleter{}
 
-	err := deleteBlobWithDeleter(
+	err := doDeleteBlob(
 		context.Background(),
 		&cobra.Command{},
 		opts,
@@ -108,7 +106,7 @@ func Test_deleteBlobWithDeleter_deleted(t *testing.T) {
 		handler,
 	)
 	if err != nil {
-		t.Fatalf("deleteBlobWithDeleter() error = %v, want nil", err)
+		t.Fatalf("doDeleteBlob() error = %v, want nil", err)
 	}
 	if !deleter.deleted {
 		t.Fatal("Delete() was not called")
