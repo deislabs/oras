@@ -17,6 +17,7 @@ package option
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -28,6 +29,8 @@ import (
 	"testing"
 
 	"github.com/opencontainers/go-digest"
+	"github.com/oras-project/oras-go/v3/errdef"
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	remoteconfig "github.com/oras-project/oras-go/v3/registry/remote/config"
 	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/sirupsen/logrus"
@@ -273,5 +276,138 @@ func TestRemote_tlsConfig_transportProperties(t *testing.T) {
 	}
 	if config.InsecureSkipVerify {
 		t.Error("InsecureSkipVerify = true, want false without properties")
+	}
+}
+
+// useFullContainersConfig enables the containers configuration with every
+// file present: registries.conf, auth.json, policy.json, registries.d and
+// certs.d for host.
+func useFullContainersConfig(t *testing.T, host, registriesConf string) {
+	t.Helper()
+	t.Setenv(ContainersConfigEnv, "true")
+	dir := t.TempDir()
+	write := func(name string, content []byte) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	auth := base64.StdEncoding.EncodeToString([]byte("authuser:authpass"))
+	opts := remoteconfig.LoadConfigsOptions{
+		DockerConfigPath:     filepath.Join(dir, "missing"),
+		ContainersAuthPath:   write("auth.json", fmt.Appendf(nil, `{"auths":{%q:{"auth":%q}}}`, host, auth)),
+		RegistriesConfigPath: write("registries.conf", []byte(registriesConf)),
+		PolicyConfigPath:     write("policy.json", []byte(`{"default":[{"type":"insecureAcceptAnything"}]}`)),
+		RegistriesDPath:      filepath.Dir(write("registries.d/default.yaml", []byte("default-docker:\n  lookaside: file:///tmp/sigstore\n"))),
+		CertsDirPaths:        []string{filepath.Join(dir, "certs.d")},
+	}
+	write(filepath.Join("certs.d", host, "ca.crt"), localhostServerCert)
+	write(filepath.Join("certs.d", host, "client.cert"), localhostClientCert)
+	write(filepath.Join("certs.d", host, "client.key"), testingKey(localhostClientKey))
+	configs, err := remoteconfig.LoadConfigsWithOptions(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setContainersConfigLoader(t, func() (*remoteconfig.Configs, error) { return configs, nil })
+}
+
+func TestRemote_NewRepository_containersConfigFullStack(t *testing.T) {
+	const host = "registry.example:5000"
+	useFullContainersConfig(t, host, fmt.Sprintf(`
+[[registry]]
+location = %q
+token-flow = "oauth2"
+referrers-api = "unsupported"
+`, host))
+	ctx := context.Background()
+
+	opts := Remote{plainHTTP: plainHTTPNotSpecified}
+	repo, err := opts.NewRepository(host+"/app", Common{}, logrus.New())
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	if repo.Registry.Policy == nil {
+		t.Error("Policy = nil, want the policy.json evaluator")
+	}
+	client, ok := repo.Registry.Client.(*auth.Client)
+	if !ok {
+		t.Fatalf("Client = %T, want *auth.Client", repo.Registry.Client)
+	}
+	if fetcher, ok := client.TokenFetcher.(*auth.CompositeTokenFetcher); !ok || !fetcher.StrictOAuth2 {
+		t.Errorf("TokenFetcher = %#v, want a strict OAuth2 fetcher for token-flow = oauth2", client.TokenFetcher)
+	}
+	cred, err := client.CredentialFunc(ctx, properties.Resource{Registry: host})
+	if err != nil {
+		t.Fatalf("CredentialFunc() error = %v", err)
+	}
+	if cred.Username != "authuser" || cred.Password != "authpass" {
+		t.Errorf("CredentialFunc() = %+v, want the auth.json credential", cred)
+	}
+
+	// --registry-config selects the credential files, so auth.json is skipped.
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts = Remote{plainHTTP: plainHTTPNotSpecified, Configs: []string{configPath}}
+	repo, err = opts.NewRepository(host+"/app", Common{}, logrus.New())
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	cred, err = repo.Registry.Client.(*auth.Client).CredentialFunc(ctx, properties.Resource{Registry: host})
+	if err != nil {
+		t.Fatalf("CredentialFunc() error = %v", err)
+	}
+	if !cred.IsEmpty() {
+		t.Errorf("CredentialFunc() = %+v, want no credential with --registry-config", cred)
+	}
+}
+
+func TestRemote_NewRegistry_containersConfigFullStack(t *testing.T) {
+	const host = "registry.example:5000"
+	useFullContainersConfig(t, host, fmt.Sprintf(`
+[[registry]]
+location = %q
+token-flow = "distribution"
+`, host))
+	opts := Remote{plainHTTP: plainHTTPNotSpecified}
+	reg, err := opts.NewRegistry(host, Common{}, logrus.New())
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	client, ok := reg.Client.(*auth.Client)
+	if !ok {
+		t.Fatalf("Client = %T, want *auth.Client", reg.Client)
+	}
+	if fetcher, ok := client.TokenFetcher.(*auth.CompositeTokenFetcher); !ok || fetcher.StrictOAuth2 {
+		t.Errorf("TokenFetcher = %#v, want the distribution-spec fetcher", client.TokenFetcher)
+	}
+}
+
+func TestRemote_NewRepository_containersConfigInvalidReference(t *testing.T) {
+	useContainersConfig(t, "")
+	opts := Remote{plainHTTP: plainHTTPNotSpecified}
+	if _, err := opts.NewRepository("localhost:5000/INVALID", Common{}, logrus.New()); !errors.Is(err, errdef.ErrInvalidReference) {
+		t.Errorf("NewRepository() error = %v, want %v", err, errdef.ErrInvalidReference)
+	}
+}
+
+func TestRemote_tlsConfig_transportCACert(t *testing.T) {
+	caPath := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(caPath, localhostServerCert, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Remote{}
+	config, err := opts.tlsConfig(&properties.Transport{CACert: caPath})
+	if err != nil {
+		t.Fatalf("tlsConfig() error = %v", err)
+	}
+	if config.RootCAs == nil {
+		t.Error("RootCAs = nil, want the CA certificate")
 	}
 }
