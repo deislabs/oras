@@ -163,6 +163,18 @@ func TestBackupHandler_OnTagsFound(t *testing.T) {
 			want:    fmt.Sprintf("Found 6 tag(s) in %s:\nt1\nt2\nt3\nt4\nt5\nt6\n", repo),
 		},
 		{
+			name:    "error writing heading",
+			tags:    []string{"t1", "t2", "t3", "t4", "t5", "t6"},
+			out:     &errorWriter{},
+			wantErr: true,
+		},
+		{
+			name:    "error writing tag",
+			tags:    []string{"t1", "t2", "t3", "t4", "t5", "t6"},
+			out:     &failAfterWriter{failAfter: 1},
+			wantErr: true,
+		},
+		{
 			name:    "good path with no tags",
 			tags:    []string{},
 			out:     &bytes.Buffer{},
@@ -175,7 +187,7 @@ func TestBackupHandler_OnTagsFound(t *testing.T) {
 			printer := output.NewPrinter(tt.out, os.Stderr)
 			bh := NewBackupHandler(repo, printer)
 			if err := bh.OnTagsFound(tt.tags); (err != nil) != tt.wantErr {
-				t.Errorf("OnTagsFound() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("OnTagsFound() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !tt.wantErr {
 				got := tt.out.(*bytes.Buffer).String()
@@ -240,4 +252,17 @@ func TestBackupHandler_OnBackupCompleted(t *testing.T) {
 			}
 		})
 	}
+}
+
+type failAfterWriter struct {
+	writes    int
+	failAfter int
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.writes >= w.failAfter {
+		return 0, fmt.Errorf("got an error")
+	}
+	w.writes++
+	return len(p), nil
 }

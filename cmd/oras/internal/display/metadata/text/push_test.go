@@ -24,6 +24,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras/cmd/oras/internal/option"
 	"oras.land/oras/cmd/oras/internal/output"
 )
 
@@ -71,8 +72,95 @@ func TestPushHandler_Render(t *testing.T) {
 				root:    tt.root,
 			}
 			if err := p.Render(); (err != nil) != tt.wantErr {
-				t.Errorf("PushHandler.Render() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("PushHandler.Render() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNewPushHandler(t *testing.T) {
+	var out bytes.Buffer
+	printer := output.NewPrinter(&out, os.Stderr)
+
+	handler := NewPushHandler(printer)
+	if handler == nil {
+		t.Fatal("expected a non-nil handler")
+	}
+
+	ph, ok := handler.(*PushHandler)
+	if !ok {
+		t.Fatal("expected handler to be of type *PushHandler")
+	}
+	if ph.printer != printer {
+		t.Error("handler printer does not match the supplied printer")
+	}
+}
+
+func TestPushHandler_OnTagged(t *testing.T) {
+	tests := []struct {
+		name       string
+		out        io.Writer
+		wantOutput string
+		wantErr    bool
+	}{
+		{
+			name:       "success",
+			out:        &bytes.Buffer{},
+			wantOutput: "Tagged v1\n",
+		},
+		{
+			name:    "writer error",
+			out:     &errorWriter{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			printer := output.NewPrinter(tt.out, os.Stderr)
+			handler := NewPushHandler(printer)
+
+			err := handler.OnTagged(ocispec.Descriptor{}, "v1")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("OnTagged() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if !tt.wantErr {
+				if got := tt.out.(*bytes.Buffer).String(); got != tt.wantOutput {
+					t.Errorf("OnTagged() output = %q, want %q", got, tt.wantOutput)
+				}
+			}
+		})
+	}
+}
+
+func TestPushHandler_OnCopied(t *testing.T) {
+	var out bytes.Buffer
+	printer := output.NewPrinter(&out, os.Stderr)
+	handler := NewPushHandler(printer)
+
+	target := &option.Target{RawReference: "example.com/repo:v1"}
+	root := ocispec.Descriptor{
+		ArtifactType: "application/example",
+		Digest:       digest.FromBytes([]byte("content")),
+		Size:         int64(len("content")),
+	}
+
+	err := handler.OnCopied(target, root)
+	if err != nil {
+		t.Fatalf("OnCopied() error = %v, want nil", err)
+	}
+
+	wantOutput := "Pushed [] example.com/repo:v1\n"
+	if got := out.String(); got != wantOutput {
+		t.Errorf("OnCopied() output = %q, want %q", got, wantOutput)
+	}
+
+	ph := handler.(*PushHandler)
+	if ph.root.ArtifactType != root.ArtifactType {
+		t.Errorf("stored ArtifactType = %q, want %q", ph.root.ArtifactType, root.ArtifactType)
+	}
+	if ph.root.Digest != root.Digest {
+		t.Errorf("stored Digest = %q, want %q", ph.root.Digest, root.Digest)
 	}
 }

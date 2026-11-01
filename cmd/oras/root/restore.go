@@ -31,6 +31,8 @@ import (
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
+	"oras.land/oras/cmd/oras/internal/display/metadata"
+	"oras.land/oras/cmd/oras/internal/display/status"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/option"
 	orasio "oras.land/oras/internal/io"
@@ -140,7 +142,17 @@ func runRestore(cmd *cobra.Command, opts *restoreOptions) error {
 		return fmt.Errorf("failed to prepare target repository %q: %w", opts.repository, err)
 	}
 	statusHandler, metadataHandler := display.NewRestoreHandler(opts.Printer, opts.TTY, dstRepo, opts.dryRun)
+	return doRestore(ctx, opts, dstRepo, startTime, statusHandler, metadataHandler)
+}
 
+func doRestore(
+	ctx context.Context,
+	opts *restoreOptions,
+	dstRepo oras.GraphTarget,
+	startTime time.Time,
+	statusHandler status.RestoreHandler,
+	metadataHandler metadata.RestoreHandler,
+) error {
 	// prepare the source OCI store
 	var srcOCI oras.ReadOnlyGraphTarget
 	fi, err := os.Stat(opts.input)

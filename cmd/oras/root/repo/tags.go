@@ -16,6 +16,7 @@ limitations under the License.
 package repo
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -25,6 +26,7 @@ import (
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
+	"oras.land/oras/cmd/oras/internal/display/metadata"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/option"
 	"oras.land/oras/internal/contentutil"
@@ -129,7 +131,11 @@ func showTags(cmd *cobra.Command, opts *showTagsOptions) error {
 	if err != nil {
 		return err
 	}
-	err = finder.Tags(ctx, opts.last, func(tags []string) error {
+	return doShowTags(ctx, finder, opts, targetPrefix, targetDigest, handler)
+}
+
+func doShowTags(ctx context.Context, finder option.ReadOnlyGraphTagFinderTarget, opts *showTagsOptions, targetPrefix, targetDigest string, handler metadata.RepoTagsHandler) error {
+	err := finder.Tags(ctx, opts.last, func(tags []string) error {
 		for _, tag := range tags {
 			// if --oci-layout-path is used with a repository path, filter the
 			// tags under the repository.

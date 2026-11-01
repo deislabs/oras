@@ -154,7 +154,11 @@ func runDiscover(cmd *cobra.Command, opts *discoverOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := fetchAllReferrers(ctx, repo, desc, opts.artifactType, handler, opts.depth, make(map[digest.Digest]bool)); err != nil {
+	return doDiscover(ctx, repo, desc, opts.artifactType, opts.depth, handler)
+}
+
+func doDiscover(ctx context.Context, repo oras.ReadOnlyGraphTarget, desc ocispec.Descriptor, artifactType string, depth int, handler metadata.DiscoverHandler) error {
+	if err := fetchAllReferrers(ctx, repo, desc, artifactType, handler, depth, make(map[digest.Digest]bool)); err != nil {
 		return err
 	}
 	return handler.Render()

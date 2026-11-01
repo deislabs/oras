@@ -29,6 +29,8 @@ import (
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
+	"oras.land/oras/cmd/oras/internal/display/metadata"
+	"oras.land/oras/cmd/oras/internal/display/status"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/fileref"
 	"oras.land/oras/cmd/oras/internal/option"
@@ -186,6 +188,10 @@ func runAttach(cmd *cobra.Command, opts *attachOptions) error {
 	if err != nil {
 		return err
 	}
+	return doAttach(ctx, opts, store, dst, subject, statusHandler, metadataHandler)
+}
+
+func doAttach(ctx context.Context, opts *attachOptions, store *file.Store, dst oras.GraphTarget, subject ocispec.Descriptor, statusHandler status.AttachHandler, metadataHandler metadata.AttachHandler) error {
 	descs, err := loadFiles(ctx, store, opts.Annotations, opts.FileRefs, statusHandler)
 	if err != nil {
 		return err

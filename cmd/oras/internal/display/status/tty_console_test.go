@@ -180,3 +180,18 @@ func TestTTYCopyHandler_PreCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTTYBlobPushHandler_StartStopTracking(t *testing.T) {
+	_, child, err := testutils.NewPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = child.Close() }()
+	bh := NewTTYBlobPushHandler(child, mockFetcher.OciImage)
+	if _, err := bh.StartTracking(memory.New()); err != nil {
+		t.Fatalf("StartTracking() error = %v", err)
+	}
+	if err := bh.StopTracking(); err != nil {
+		t.Fatalf("StopTracking() error = %v", err)
+	}
+}

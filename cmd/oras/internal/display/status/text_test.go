@@ -396,3 +396,169 @@ func TestTextRestoreHandler(t *testing.T) {
 		}
 	})
 }
+
+func TestTextPushHandler_TrackTarget(t *testing.T) {
+	ph := NewTextPushHandler(printer, mockFetcher.Fetcher)
+	gt := memory.New()
+	tracked, stop, err := ph.TrackTarget(gt)
+	if err != nil {
+		t.Fatalf("TrackTarget() error = %v", err)
+	}
+	if tracked != gt {
+		t.Error("TrackTarget() should return the original target")
+	}
+	if err := stop(); err != nil {
+		t.Errorf("stop() error = %v", err)
+	}
+}
+
+func TestTextAttachHandler_PreCopy(t *testing.T) {
+	builder.Reset()
+	ah := NewTextAttachHandler(printer, mockFetcher.Fetcher)
+	if err := ah.PreCopy(ctx, mockFetcher.OciImage); err != nil {
+		t.Fatalf("PreCopy() error = %v", err)
+	}
+	validatePrinted(t, "Uploading 0b442c23c1dd oci-image")
+}
+
+func TestTextPullHandler_TrackTarget(t *testing.T) {
+	ph := NewTextPullHandler(printer)
+	gt := memory.New()
+	tracked, stop, err := ph.TrackTarget(gt)
+	if err != nil {
+		t.Fatalf("TrackTarget() error = %v", err)
+	}
+	if tracked != gt {
+		t.Error("TrackTarget() should return the original target")
+	}
+	if err := stop(); err != nil {
+		t.Errorf("stop() error = %v", err)
+	}
+}
+
+func TestTextCopyHandler_StartStopTracking(t *testing.T) {
+	ch := NewTextCopyHandler(printer, mockFetcher.Fetcher)
+	gt := memory.New()
+	tracked, err := ch.StartTracking(gt)
+	if err != nil {
+		t.Fatalf("StartTracking() error = %v", err)
+	}
+	if tracked != gt {
+		t.Error("StartTracking() should return the original target")
+	}
+	if err := ch.StopTracking(); err != nil {
+		t.Errorf("StopTracking() error = %v", err)
+	}
+}
+
+func TestTextManifestPushHandler(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(ManifestPushHandler) error
+		want string
+	}{
+		{"OnManifestPushSkipped", ManifestPushHandler.OnManifestPushSkipped, "Exists    0b442c23c1dd oci-image"},
+		{"OnManifestPushing", ManifestPushHandler.OnManifestPushing, "Uploading 0b442c23c1dd oci-image"},
+		{"OnManifestPushed", ManifestPushHandler.OnManifestPushed, "Uploaded  0b442c23c1dd oci-image"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder.Reset()
+			if err := tt.call(NewTextManifestPushHandler(printer, mockFetcher.OciImage)); err != nil {
+				t.Fatalf("%s() error = %v", tt.name, err)
+			}
+			validatePrinted(t, tt.want)
+		})
+	}
+}
+
+func TestTextManifestIndexCreateHandler(t *testing.T) {
+	desc := mockFetcher.OciImage
+	digestRef := desc.Digest.String()
+	tests := []struct {
+		name string
+		call func(ManifestIndexCreateHandler) error
+		want string
+	}{
+		{"OnFetching", func(h ManifestIndexCreateHandler) error { return h.OnFetching("v1") }, "Fetching  v1"},
+		{"OnFetched tag", func(h ManifestIndexCreateHandler) error { return h.OnFetched("v1", desc) }, "Fetched   " + digestRef + " v1"},
+		{"OnFetched digest", func(h ManifestIndexCreateHandler) error { return h.OnFetched(digestRef, desc) }, "Fetched   " + digestRef},
+		{"OnIndexPacked", func(h ManifestIndexCreateHandler) error { return h.OnIndexPacked(desc) }, "Packed    0b442c23c1dd " + ocispec.MediaTypeImageIndex},
+		{"OnIndexPushed", func(h ManifestIndexCreateHandler) error { return h.OnIndexPushed("localhost:5000/repo:v1") }, "Pushed    localhost:5000/repo:v1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder.Reset()
+			if err := tt.call(NewTextManifestIndexCreateHandler(printer)); err != nil {
+				t.Fatalf("%s error = %v", tt.name, err)
+			}
+			validatePrinted(t, tt.want)
+		})
+	}
+}
+
+func TestTextManifestIndexUpdateHandler(t *testing.T) {
+	desc := mockFetcher.OciImage
+	digestRef := desc.Digest.String()
+	tests := []struct {
+		name string
+		call func(ManifestIndexUpdateHandler) error
+		want string
+	}{
+		{"OnFetching", func(h ManifestIndexUpdateHandler) error { return h.OnFetching("v1") }, "Fetching  v1"},
+		{"OnFetched tag", func(h ManifestIndexUpdateHandler) error { return h.OnFetched("v1", desc) }, "Fetched   " + digestRef + " v1"},
+		{"OnFetched digest", func(h ManifestIndexUpdateHandler) error { return h.OnFetched(digestRef, desc) }, "Fetched   " + digestRef},
+		{"OnManifestRemoved", func(h ManifestIndexUpdateHandler) error { return h.OnManifestRemoved(desc.Digest) }, "Removed   " + digestRef},
+		{"OnManifestAdded tag", func(h ManifestIndexUpdateHandler) error { return h.OnManifestAdded("v1", desc) }, "Added     " + digestRef + " v1"},
+		{"OnManifestAdded digest", func(h ManifestIndexUpdateHandler) error { return h.OnManifestAdded(digestRef, desc) }, "Added     " + digestRef},
+		{"OnIndexMerged tag", func(h ManifestIndexUpdateHandler) error { return h.OnIndexMerged("v1", desc) }, "Merged    " + digestRef + " v1"},
+		{"OnIndexMerged digest", func(h ManifestIndexUpdateHandler) error { return h.OnIndexMerged(digestRef, desc) }, "Merged    " + digestRef},
+		{"OnIndexPacked", func(h ManifestIndexUpdateHandler) error { return h.OnIndexPacked(desc) }, "Updated   " + digestRef},
+		{"OnIndexPushed", func(h ManifestIndexUpdateHandler) error { return h.OnIndexPushed("localhost:5000/repo:v1") }, "Pushed    localhost:5000/repo:v1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder.Reset()
+			if err := tt.call(NewTextManifestIndexUpdateHandler(printer)); err != nil {
+				t.Fatalf("%s error = %v", tt.name, err)
+			}
+			validatePrinted(t, tt.want)
+		})
+	}
+}
+
+func TestTextBlobPushHandler(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(BlobPushHandler) error
+		want string
+	}{
+		{"OnBlobExists", BlobPushHandler.OnBlobExists, "Exists    0b442c23c1dd oci-image"},
+		{"OnBlobUploading", BlobPushHandler.OnBlobUploading, "Uploading 0b442c23c1dd oci-image"},
+		{"OnBlobUploaded", BlobPushHandler.OnBlobUploaded, "Uploaded  0b442c23c1dd oci-image"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder.Reset()
+			if err := tt.call(NewTextBlobPushHandler(printer, mockFetcher.OciImage)); err != nil {
+				t.Fatalf("%s() error = %v", tt.name, err)
+			}
+			validatePrinted(t, tt.want)
+		})
+	}
+}
+
+func TestTextBlobPushHandler_StartStopTracking(t *testing.T) {
+	bh := NewTextBlobPushHandler(printer, mockFetcher.OciImage)
+	gt := memory.New()
+	tracked, err := bh.StartTracking(gt)
+	if err != nil {
+		t.Fatalf("StartTracking() error = %v", err)
+	}
+	if tracked != gt {
+		t.Error("StartTracking() should return the original target")
+	}
+	if err := bh.StopTracking(); err != nil {
+		t.Errorf("StopTracking() error = %v", err)
+	}
+}

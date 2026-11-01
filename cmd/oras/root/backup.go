@@ -37,6 +37,7 @@ import (
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
 	"oras.land/oras/cmd/oras/internal/display/metadata"
+	"oras.land/oras/cmd/oras/internal/display/status"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/option"
 	"oras.land/oras/internal/docker"
@@ -205,7 +206,20 @@ func runBackup(cmd *cobra.Command, opts *backupOptions) error {
 		return fmt.Errorf("failed to prepare OCI store for backup: %w", err)
 	}
 	statusHandler, metadataHandler := display.NewBackupHandler(opts.Printer, opts.TTY, opts.repository, dstOCI)
+	return doBackup(ctx, opts, logger, srcRepo, dstOCI, dstRoot, startTime, statusHandler, metadataHandler)
+}
 
+func doBackup(
+	ctx context.Context,
+	opts *backupOptions,
+	logger logrus.FieldLogger,
+	srcRepo oras.ReadOnlyGraphTarget,
+	dstOCI oras.GraphTarget,
+	dstRoot string,
+	startTime time.Time,
+	statusHandler status.BackupHandler,
+	metadataHandler metadata.BackupHandler,
+) error {
 	// Resolve tags to back up
 	tags, roots, err := resolveTags(ctx, srcRepo, opts.tags)
 	if err != nil {

@@ -16,6 +16,7 @@ limitations under the License.
 package manifest
 
 import (
+	"context"
 	"fmt"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -25,6 +26,8 @@ import (
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
+	"oras.land/oras/cmd/oras/internal/display/content"
+	"oras.land/oras/cmd/oras/internal/display/metadata"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/option"
 )
@@ -138,8 +141,13 @@ func fetchManifest(cmd *cobra.Command, opts *fetchOptions) (fetchErr error) {
 	if err != nil {
 		return err
 	}
+	return doFetchManifest(ctx, src, opts, metadataHandler, contentHandler)
+}
+
+func doFetchManifest(ctx context.Context, src oras.ReadOnlyTarget, opts *fetchOptions, metadataHandler metadata.ManifestFetchHandler, contentHandler content.ManifestFetchHandler) error {
 	var desc ocispec.Descriptor
-	var content []byte
+	var manifestContent []byte
+	var err error
 	if opts.OutputDescriptor && opts.outputPath == "" {
 		// fetch manifest descriptor only
 		fetchOpts := oras.DefaultResolveOptions
@@ -152,13 +160,13 @@ func fetchManifest(cmd *cobra.Command, opts *fetchOptions) (fetchErr error) {
 		// fetch manifest descriptor and content
 		fetchOpts := oras.DefaultFetchBytesOptions
 		fetchOpts.TargetPlatform = opts.Platform.Platform
-		desc, content, err = oras.FetchBytes(ctx, src, opts.Reference, fetchOpts)
+		desc, manifestContent, err = oras.FetchBytes(ctx, src, opts.Reference, fetchOpts)
 		if err != nil {
 			return fmt.Errorf("failed to fetch the content of %q: %w", opts.RawReference, err)
 		}
-		if err = contentHandler.OnContentFetched(desc, content); err != nil {
+		if err = contentHandler.OnContentFetched(desc, manifestContent); err != nil {
 			return err
 		}
 	}
-	return metadataHandler.OnFetched(opts.Path, desc, content)
+	return metadataHandler.OnFetched(opts.Path, desc, manifestContent)
 }

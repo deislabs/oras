@@ -16,10 +16,18 @@ limitations under the License.
 package root
 
 import (
+	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/cobra"
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/memory"
+	"oras.land/oras/cmd/oras/internal/display/displaytest"
+	"oras.land/oras/internal/listener"
 )
 
 func Test_tagCmd_requiresSourceAndDestination(t *testing.T) {
@@ -33,5 +41,64 @@ func Test_tagCmd_requiresSourceAndDestination(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "at least 2 arguments") {
 		t.Fatalf("expected an argument count error, got %v", err)
+	}
+}
+
+func TestTagListener_handlerCallOrderAndError(t *testing.T) {
+	target := memory.New()
+	desc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest}
+	wantedErr := errors.New("tagging failed")
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingTagHandler{Recorder: recorder, TaggingErr: wantedErr}
+	wrapped := listener.NewTagListener(target, handler.OnTagging, handler.OnTagged)
+	if err := wrapped.Tag(context.Background(), desc, "v1"); !errors.Is(err, wantedErr) {
+		t.Fatalf("Tag() error = %v, want %v", err, wantedErr)
+	}
+	if got, want := recorder.Snapshot(), []string{"OnTagging"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("handler calls = %v, want %v", got, want)
+	}
+}
+
+func Test_doTag_handlerCallOrderAndError(t *testing.T) {
+	ctx := context.Background()
+	target := memory.New()
+	desc, err := oras.PackManifest(ctx, target, oras.PackManifestVersion1_1, "application/example", oras.PackManifestOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Tag(ctx, desc, "source"); err != nil {
+		t.Fatal(err)
+	}
+	wantedErr := errors.New("tagging failed")
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingTagHandler{Recorder: recorder, TaggingErr: wantedErr}
+	opts := oras.DefaultTagNOptions
+	err = doTag(ctx, target, "source", []string{"destination"}, opts, handler)
+	if !errors.Is(err, wantedErr) {
+		t.Fatalf("doTag() error = %v, want %v", err, wantedErr)
+	}
+	if got, want := recorder.Snapshot(), []string{"OnTagging"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("handler calls = %v, want %v", got, want)
+	}
+}
+
+func Test_doTag_handlerCallOrder(t *testing.T) {
+	ctx := context.Background()
+	target := memory.New()
+	desc, err := oras.PackManifest(ctx, target, oras.PackManifestVersion1_1, "application/example", oras.PackManifestOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Tag(ctx, desc, "source"); err != nil {
+		t.Fatal(err)
+	}
+	recorder := &displaytest.CallRecorder{}
+	handler := &displaytest.RecordingTagHandler{Recorder: recorder}
+	err = doTag(ctx, target, "source", []string{"destination"}, oras.DefaultTagNOptions, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := recorder.Snapshot(), []string{"OnTagging", "OnTagged"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("handler calls = %v, want %v", got, want)
 	}
 }

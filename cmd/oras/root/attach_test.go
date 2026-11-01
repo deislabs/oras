@@ -20,12 +20,17 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/cobra"
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/file"
+	"oras.land/oras-go/v2/content/oci"
 
+	"oras.land/oras/cmd/oras/internal/display/displaytest"
 	"oras.land/oras/cmd/oras/internal/option"
 )
 
@@ -96,5 +101,48 @@ func Test_attachCmd_configAnnotationsWiredToPackOpts(t *testing.T) {
 	}
 	if packOpts.ConfigAnnotations["org.example.key"] != "val" {
 		t.Fatalf("expected 'org.example.key'='val', got %v", packOpts.ConfigAnnotations)
+	}
+}
+
+func Test_doAttach_handlerCalls(t *testing.T) {
+	ctx := context.Background()
+	dst, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, err := oras.PackManifest(ctx, dst, oras.PackManifestVersion1_1, "application/example", oras.PackManifestOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := file.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	fileRef := filepath.Join(t.TempDir(), "layer.txt")
+	if err := os.WriteFile(fileRef, []byte("layer"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	opts := &attachOptions{
+		Packer:       option.Packer{FileRefs: []string{fileRef}},
+		artifactType: "application/example.artifact",
+	}
+	recorder := &displaytest.CallRecorder{}
+	statusHandler := &displaytest.RecordingAttachStatusHandler{Recorder: recorder}
+	metadataHandler := &displaytest.RecordingAttachMetadataHandler{Recorder: recorder}
+
+	if err := doAttach(ctx, opts, store, dst, subject, statusHandler, metadataHandler); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := recorder.Snapshot()
+	if len(calls) < 5 {
+		t.Fatalf("handler calls = %v, want at least 5", calls)
+	}
+	if got, want := calls[:2], []string{"OnFileLoading", "TrackTarget"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("first handler calls = %v, want %v", got, want)
+	}
+	if got, want := calls[len(calls)-3:], []string{"StopTrackTarget", "OnAttached", "Render"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("last handler calls = %v, want %v", got, want)
 	}
 }

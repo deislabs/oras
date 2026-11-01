@@ -16,6 +16,7 @@ limitations under the License.
 package blob
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
+	"oras.land/oras/cmd/oras/internal/display/metadata"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/option"
 	"oras.land/oras/internal/registryutil"
@@ -80,11 +82,20 @@ func deleteBlob(cmd *cobra.Command, opts *deleteBlobOptions) (err error) {
 	if err != nil {
 		return err
 	}
+
+	return doDeleteBlob(ctx, cmd, opts, blobs, display.NewBlobDeleteHandler(opts.Printer, &opts.Target))
+}
+
+func doDeleteBlob(
+	ctx context.Context,
+	cmd *cobra.Command,
+	opts *deleteBlobOptions,
+	blobs option.ResolvableDeleter,
+	metadataHandler metadata.BlobDeleteHandler,
+) error {
 	if err := opts.EnsureReferenceNotEmpty(cmd, false); err != nil {
 		return err
 	}
-
-	metadataHandler := display.NewBlobDeleteHandler(opts.Printer, &opts.Target)
 
 	// add both pull and delete scope hints for dst repository to save potential delete-scope token requests during deleting
 	ctx = registryutil.WithScopeHint(ctx, blobs, auth.ActionPull, auth.ActionDelete)

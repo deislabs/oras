@@ -17,6 +17,7 @@ package root
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
+	"oras.land/oras/cmd/oras/internal/display/metadata"
 	"oras.land/oras/cmd/oras/internal/display/status"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/fileref"
@@ -231,6 +233,26 @@ func runPush(cmd *cobra.Command, opts *pushOptions) error {
 	if err != nil {
 		return err
 	}
+	return doPushCommand(
+		ctx, opts, packOpts, store, memoryStore, union,
+		statusHandler, metadataHandler,
+		func() (oras.GraphTarget, error) {
+			return opts.NewTarget(opts.Common, logger)
+		},
+	)
+}
+
+func doPushCommand(
+	ctx context.Context,
+	opts *pushOptions,
+	packOpts oras.PackManifestOptions,
+	store *file.Store,
+	memoryStore *memory.Store,
+	union oras.ReadOnlyTarget,
+	statusHandler status.PushHandler,
+	metadataHandler metadata.PushHandler,
+	newTarget func() (oras.GraphTarget, error),
+) error {
 	descs, err := loadFiles(ctx, store, opts.Annotations, opts.FileRefs, statusHandler)
 	if err != nil {
 		return err
@@ -248,7 +270,7 @@ func runPush(cmd *cobra.Command, opts *pushOptions) error {
 	}
 
 	// prepare push
-	originalDst, err := opts.NewTarget(opts.Common, logger)
+	originalDst, err := newTarget()
 	if err != nil {
 		return err
 	}
@@ -286,8 +308,7 @@ func runPush(cmd *cobra.Command, opts *pushOptions) error {
 	if err != nil {
 		return err
 	}
-	err = metadataHandler.OnCopied(&opts.Target, root)
-	if err != nil {
+	if err = metadataHandler.OnCopied(&opts.Target, root); err != nil {
 		return err
 	}
 
@@ -304,8 +325,7 @@ func runPush(cmd *cobra.Command, opts *pushOptions) error {
 		}
 	}
 
-	err = metadataHandler.Render()
-	if err != nil {
+	if err = metadataHandler.Render(); err != nil {
 		return err
 	}
 

@@ -16,14 +16,17 @@ limitations under the License.
 package repo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
+	"oras.land/oras/cmd/oras/internal/display/metadata"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/option"
 	"oras.land/oras/internal/repository"
@@ -36,6 +39,18 @@ type repositoryOptions struct {
 	hostname  string
 	namespace string
 	last      string
+}
+
+func emitRepositories(repos []string, namespace string, handler metadata.RepoListHandler) error {
+	for _, repo := range repos {
+		if namespace == "" || strings.HasPrefix(repo, namespace) {
+			// list repositories under the specified namespace
+			if err := handler.OnRepositoryListed(repo); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func listCmd() *cobra.Command {
@@ -92,22 +107,18 @@ func listRepository(cmd *cobra.Command, opts *repositoryOptions) error {
 	if err != nil {
 		return err
 	}
-	err = reg.Repositories(ctx, opts.last, func(repos []string) error {
-		for _, repo := range repos {
-			if opts.namespace == "" || strings.HasPrefix(repo, opts.namespace) {
-				// list repositories under the specified namespace
-				if err := handler.OnRepositoryListed(repo); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+	return doListRepository(ctx, reg, opts.last, opts.namespace, handler)
+}
+
+func doListRepository(ctx context.Context, reg *remote.Registry, last, namespace string, handler metadata.RepoListHandler) error {
+	err := reg.Repositories(ctx, last, func(repos []string) error {
+		return emitRepositories(repos, namespace, handler)
 	})
 
 	if err != nil {
 		var repoErr error
-		if opts.namespace != "" {
-			repoErr = fmt.Errorf("could not list repositories for %q with prefix %q", reg.Reference.Host(), opts.namespace)
+		if namespace != "" {
+			repoErr = fmt.Errorf("could not list repositories for %q with prefix %q", reg.Reference.Host(), namespace)
 		} else {
 			repoErr = fmt.Errorf("could not list repositories for %q", reg.Reference.Host())
 		}
