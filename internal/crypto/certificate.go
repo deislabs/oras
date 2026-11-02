@@ -21,15 +21,17 @@ import (
 	"os"
 )
 
-// LoadCertPool returns a new cert pool loaded from the cert file.
-func LoadCertPool(path string) (*x509.CertPool, error) {
+// LoadCertPool returns a new cert pool loaded from one or more cert files.
+func LoadCertPool(paths ...string) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
-	pemBytes, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if ok := pool.AppendCertsFromPEM(pemBytes); !ok {
-		return nil, errors.New("Failed to load certificate in file: " + path)
+	for _, path := range paths {
+		pemBytes, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if ok := pool.AppendCertsFromPEM(pemBytes); !ok {
+			return nil, errors.New("Failed to load certificate in file: " + path)
+		}
 	}
 	return pool, nil
 }

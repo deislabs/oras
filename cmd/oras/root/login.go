@@ -22,9 +22,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
@@ -112,11 +112,11 @@ func runLogin(cmd *cobra.Command, opts loginOptions) (err error) {
 	if err != nil {
 		return err
 	}
-	remote, err := opts.NewRegistry(opts.Hostname, opts.Common, logger)
+	reg, err := opts.NewRegistry(opts.Hostname, opts.Common, logger)
 	if err != nil {
 		return err
 	}
-	if err = credentials.Login(ctx, store, remote, opts.Credential()); err != nil {
+	if err = remote.Login(ctx, store, reg, opts.Credential()); err != nil {
 		return err
 	}
 	_ = opts.Printer.Println("Login Succeeded")

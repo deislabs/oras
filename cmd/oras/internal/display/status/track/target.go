@@ -22,9 +22,9 @@ import (
 	"os"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/errdef"
-	"oras.land/oras-go/v2/registry"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/errdef"
+	"github.com/oras-project/oras-go/v3/registry"
 	sprogress "oras.land/oras/cmd/oras/internal/display/status/progress"
 	"oras.land/oras/internal/progress"
 )

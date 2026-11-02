@@ -37,11 +37,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
+	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
 var ts *httptest.Server
@@ -137,7 +139,7 @@ func TestRemote_authClient_RawCredential(t *testing.T) {
 	if _, err := rand.Read(password); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := auth.Credential{
+	want := credentials.Credential{
 		Username: "mocked^^??oras-@@!#",
 		Password: base64.StdEncoding.EncodeToString(password),
 	}
@@ -149,7 +151,7 @@ func TestRemote_authClient_RawCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got, err := client.Credential(nil, "")
+	got, err := client.CredentialFunc(nil, properties.Resource{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -317,9 +319,9 @@ func TestRemote_authClient_SharedCacheWiring(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		client, ok := repo.Client.(*auth.Client)
+		client, ok := repo.Registry.Client.(*auth.Client)
 		if !ok {
-			t.Fatalf("unexpected client type %T", repo.Client)
+			t.Fatalf("unexpected client type %T", repo.Registry.Client)
 		}
 		return client.Cache
 	}
@@ -1248,5 +1250,65 @@ func TestRemote_authClientDoesNotShareHeaderState(t *testing.T) {
 	}
 	if got := header.Get("User-Agent"); !strings.HasPrefix(got, "oras/") {
 		t.Fatalf("different origin received User-Agent %q, want oras/ prefix", got)
+	}
+}
+
+func TestRemote_NewRepository_referrersAPI(t *testing.T) {
+	tests := []struct {
+		name  string
+		state referrersState
+		want  properties.ReferrersAPI
+	}{
+		{"unknown", ReferrersStateUnknown, properties.ReferrersAPIUnknown},
+		{"supported", ReferrersStateSupported, properties.ReferrersAPISupported},
+		{"unsupported", ReferrersStateUnsupported, properties.ReferrersAPIUnsupported},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := Remote{
+				DistributionSpec: DistributionSpec{ReferrersAPI: tt.state},
+				plainHTTP:        plainHTTPNotSpecified,
+			}
+			repo, err := opts.NewRepository("localhost:5000/test", Common{}, logrus.New())
+			if err != nil {
+				t.Fatalf("Remote.NewRepository() error = %v", err)
+			}
+			if got := repo.ReferrersCapability(); got != tt.want {
+				t.Errorf("Repository.ReferrersCapability() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRemote_authClient_dockerHubCredential(t *testing.T) {
+	// docker.io credentials are saved under the legacy index key, but requests
+	// go to registry-1.docker.io.
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	encoded := base64.StdEncoding.EncodeToString([]byte("mocked-user:mocked-pass"))
+	config := fmt.Sprintf(`{"auths":{"https://index.docker.io/v1/":{"auth":%q}}}`, encoded)
+	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	opts := Remote{Configs: []string{configPath}}
+	client, err := opts.authClient("registry-1.docker.io", false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, err := client.CredentialFunc(context.Background(), properties.Resource{Registry: "registry-1.docker.io"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Username != "mocked-user" || got.Password != "mocked-pass" {
+		t.Fatalf("expect credential from index.docker.io key, got: %v", got)
+	}
+}
+
+func TestRemote_NewRegistry_scheme(t *testing.T) {
+	opts := Remote{}
+	if _, err := opts.NewRegistry("http://localhost:5000", Common{}, logrus.New()); err == nil {
+		t.Fatal("expect NewRegistry to reject a URL scheme")
+	}
+	if _, err := opts.NewRepository("http://localhost:5000/repo", Common{}, logrus.New()); err == nil {
+		t.Fatal("expect NewRepository to reject a URL scheme")
 	}
 }

@@ -18,8 +18,8 @@ package option
 import (
 	"os"
 
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/oci"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content/oci"
 	"oras.land/oras/internal/cache"
 )
 

@@ -101,3 +101,29 @@ func Test_ParseRepoPath(t *testing.T) {
 		})
 	}
 }
+
+func TestParseReference(t *testing.T) {
+	tests := []struct {
+		raw     string
+		wantErr bool
+	}{
+		{"localhost:5000/repo:tag", false},
+		{"http://127.0.0.1:1/repo:tag", true},
+		{"https://localhost:5000/repo", true},
+		{"oci://localhost:5000/repo:tag", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			_, err := ParseReference(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseReference(%q) error = %v, wantErr %v", tt.raw, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseRemoteRepository_scheme(t *testing.T) {
+	if _, _, err := ParseRemoteRepository("http://localhost:5000/ns"); err == nil {
+		t.Error("expect ParseRemoteRepository to reject a URL scheme")
+	}
+}

@@ -29,16 +29,17 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/oci"
-	"oras.land/oras-go/v2/errdef"
-	"oras.land/oras-go/v2/registry"
-	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/errcode"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content/oci"
+	"github.com/oras-project/oras-go/v3/errdef"
+	"github.com/oras-project/oras-go/v3/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/cmd/oras/internal/fileref"
 	"oras.land/oras/internal/contentutil"
+	"oras.land/oras/internal/repository"
 )
 
 const (
@@ -120,7 +121,7 @@ func (target *Target) Parse(cmd *cobra.Command) error {
 		return nil
 	default:
 		target.Type = TargetTypeRemote
-		ref, err := registry.ParseReference(target.RawReference)
+		ref, err := repository.ParseReference(target.RawReference)
 		if err != nil {
 			return &oerrors.Error{
 				OperationType:  oerrors.OperationTypeParseArtifactReference,
@@ -128,8 +129,9 @@ func (target *Target) Parse(cmd *cobra.Command) error {
 				Recommendation: "Please make sure the provided reference is in the form of <registry>/<repo>[:tag|@digest]",
 			}
 		}
-		target.Reference = ref.Reference
-		ref.Reference = ""
+		target.Reference = ref.GetReference()
+		ref.Tag = ""
+		ref.Digest = ""
 		target.Path = ref.String()
 		return target.Remote.Parse(cmd)
 	}
@@ -165,7 +167,9 @@ func (target *Target) newOCIStore() (*oci.Store, error) {
 }
 
 func (target *Target) newRepository(common Common, logger logrus.FieldLogger) (*remote.Repository, error) {
-	return target.NewRepository(target.RawReference, common, logger)
+	// Path holds the reference with any tag or digest stripped, which is what
+	// remote.NewRepository requires.
+	return target.NewRepository(target.Path, common, logger)
 }
 
 // NewTarget generates a new target based on target.
@@ -232,7 +236,7 @@ func (target *Target) NewReadonlyTarget(ctx context.Context, common Common, logg
 		}
 		return store, nil
 	case TargetTypeRemote:
-		return target.NewRepository(target.RawReference, common, logger)
+		return target.NewRepository(target.Path, common, logger)
 	}
 	return nil, fmt.Errorf("unknown target type: %q", target.Type)
 }
@@ -273,11 +277,11 @@ func (target *Target) ModifyError(cmd *cobra.Command, err error) (bool, error) {
 		return false, err
 	}
 
-	ref := registry.Reference{Registry: target.RawReference}
+	ref := properties.Reference{Registry: target.RawReference}
 	if errResp.URL.Host != ref.Host() {
 		// raw reference is not registry host
 		var parseErr error
-		ref, parseErr = registry.ParseReference(target.RawReference)
+		ref, parseErr = properties.NewReference(target.RawReference)
 		if parseErr != nil {
 			// this should not happen
 			return false, err

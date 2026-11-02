@@ -19,8 +19,8 @@ import (
 	"strconv"
 	"testing"
 
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/memory"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content/memory"
 	"oras.land/oras/internal/testutils"
 )
 

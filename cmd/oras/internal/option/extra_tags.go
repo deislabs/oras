@@ -19,7 +19,7 @@ import (
 	"errors"
 	"fmt"
 
-	"oras.land/oras-go/v2/registry"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 )
 
 // ValidateExtraTags validates additional destination tags.
@@ -29,8 +29,8 @@ func ValidateExtraTags(tags []string) error {
 			return errors.New("empty extra tag")
 		}
 
-		ref := registry.Reference{Reference: tag}
-		if err := ref.ValidateReferenceAsTag(); err != nil {
+		ref := properties.Reference{Tag: tag}
+		if err := ref.ValidateTag(); err != nil {
 			return fmt.Errorf("invalid extra tag: %w", err)
 		}
 	}

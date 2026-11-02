@@ -25,7 +25,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote"
 )
 
 type content struct {

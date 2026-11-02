@@ -22,8 +22,8 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/oras-project/oras-go/v3/errdef"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2/errdef"
 
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
 	"oras.land/oras/cmd/oras/internal/option"

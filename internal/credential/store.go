@@ -16,12 +16,19 @@ limitations under the License.
 package credential
 
 import (
-	"oras.land/oras-go/v2/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 )
 
 // NewStore generates a store based on the passed-in config file paths.
 func NewStore(configPaths ...string) (credentials.Store, error) {
-	opts := credentials.StoreOptions{AllowPlaintextPut: true}
+	opts := credentials.StoreOptions{
+		AllowPlaintextPut: true,
+		// oras-go v3 detects the platform-default native credentials store by
+		// default. Opt out to keep the v2 behavior of writing to the plain-text
+		// config file, so that `oras login` does not silently start storing
+		// credentials in the OS keychain.
+		IgnoreDefaultNativeStore: true,
+	}
 	if len(configPaths) == 0 {
 		// use default docker config file path
 		return credentials.NewStoreFromDocker(opts)

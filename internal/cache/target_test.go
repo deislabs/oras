@@ -31,11 +31,11 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/content/memory"
-	"oras.land/oras-go/v2/registry"
-	"oras.land/oras-go/v2/registry/remote"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content"
+	"github.com/oras-project/oras-go/v3/content/memory"
+	"github.com/oras-project/oras-go/v3/registry"
+	"github.com/oras-project/oras-go/v3/registry/remote"
 )
 
 func TestProxy_fetchCache(t *testing.T) {
@@ -192,16 +192,16 @@ func TestProxy_fetchReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("invalid test http server: %v", err)
 	}
-	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s:%s", uri.Host, repoName, tagName))
+	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s", uri.Host, repoName))
 	if err != nil {
 		t.Fatalf("NewRepository() error = %v", err)
 	}
-	repo.PlainHTTP = true
+	repo.Registry.PlainHTTP = true
 	p := New(repo, memory.New())
 	ctx := context.Background()
 
 	// first fetch reference
-	gotDesc, rc, err := p.(registry.ReferenceFetcher).FetchReference(ctx, repo.Reference.Reference)
+	gotDesc, rc, err := p.(registry.ReferenceFetcher).FetchReference(ctx, tagName)
 	if err != nil {
 		t.Fatal("ReferenceTarget.FetchReference() error =", err)
 	}
@@ -228,7 +228,7 @@ func TestProxy_fetchReference(t *testing.T) {
 	}
 
 	// second fetch reference, should get the rc from the cache
-	gotDesc, rc, err = p.(registry.ReferenceFetcher).FetchReference(ctx, repo.Reference.Reference)
+	gotDesc, rc, err = p.(registry.ReferenceFetcher).FetchReference(ctx, tagName)
 	if err != nil {
 		t.Fatal("ReferenceTarget.FetchReference() error =", err)
 	}

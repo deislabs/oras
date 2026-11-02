@@ -16,13 +16,14 @@ limitations under the License.
 package repo
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
 	"testing"
 
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/oci"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content/oci"
 	"oras.land/oras/cmd/oras/internal/display/displaytest"
 )
 
@@ -65,5 +66,35 @@ func Test_doShowTags_handlerErrorSkipsRender(t *testing.T) {
 	}
 	if got, want := recorder.Snapshot(), []string{"OnTagListed"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("handler calls = %v, want %v", got, want)
+	}
+}
+
+func Test_showTags_ociLayoutPathWithRepository(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := oci.New(root)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	desc, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, "application/vnd.test", oras.PackManifestOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, ref := range []string{"localhost:5000/hello:v1", "localhost:5000/hello:v2", "localhost:5000/other:v3"} {
+		if err := store.Tag(ctx, desc, ref); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	var out bytes.Buffer
+	cmd := showTagsCmd()
+	cmd.SetContext(ctx)
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--oci-layout-path", root, "localhost:5000/hello"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("repo tags error = %v", err)
+	}
+	if got, want := out.String(), "v1\nv2\n"; got != want {
+		t.Errorf("repo tags output = %q, want %q", got, want)
 	}
 }

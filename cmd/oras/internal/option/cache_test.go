@@ -16,13 +16,15 @@ limitations under the License.
 package option
 
 import (
+	"bytes"
+	"context"
 	"reflect"
 	"testing"
 
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/memory"
-	"oras.land/oras-go/v2/content/oci"
-	"oras.land/oras/internal/cache"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content"
+	"github.com/oras-project/oras-go/v3/content/memory"
+	"github.com/oras-project/oras-go/v3/content/oci"
 )
 
 var mockTarget oras.ReadOnlyTarget = memory.New()
@@ -32,18 +34,42 @@ func TestCache_CachedTarget(t *testing.T) {
 	t.Setenv("ORAS_CACHE", tempDir)
 	opts := Cache{}
 
+	ctx := context.Background()
+	src := memory.New()
+	blob := []byte("hello cache")
+	desc := content.NewDescriptorFromBytes("test", blob)
+	if err := src.Push(ctx, desc, bytes.NewReader(blob)); err != nil {
+		t.Fatal("error pushing to source, error =", err)
+	}
+
+	got, err := opts.CachedTarget(src)
+	if err != nil {
+		t.Fatal("Cache.CachedTarget() error=", err)
+	}
+	// oci.Store holds internal state that differs between instances opened on
+	// the same root, so verify the caching behavior instead of comparing
+	// against a separately constructed target.
+	if reflect.DeepEqual(got, oras.ReadOnlyTarget(src)) {
+		t.Fatal("Cache.CachedTarget() returned the source target, want a cached target")
+	}
+	fetched, err := content.FetchAll(ctx, got, desc)
+	if err != nil {
+		t.Fatal("error fetching through cached target, error =", err)
+	}
+	if !bytes.Equal(fetched, blob) {
+		t.Fatalf("fetched content = %q, want %q", fetched, blob)
+	}
+
 	ociStore, err := oci.New(tempDir)
 	if err != nil {
 		t.Fatal("error calling oci.New(), error =", err)
 	}
-	want := cache.New(mockTarget, ociStore)
-
-	got, err := opts.CachedTarget(mockTarget)
+	exists, err := ociStore.Exists(ctx, desc)
 	if err != nil {
-		t.Fatal("Cache.CachedTarget() error=", err)
+		t.Fatal("error checking cache, error =", err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Cache.CachedTarget() got %v, want %v", got, want)
+	if !exists {
+		t.Fatal("content was not stored in the cache")
 	}
 }
 

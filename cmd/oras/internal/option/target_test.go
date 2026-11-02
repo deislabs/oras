@@ -16,6 +16,7 @@ limitations under the License.
 package option
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -23,9 +24,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oras-project/oras-go/v3/errdef"
+	"github.com/oras-project/oras-go/v3/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2/errdef"
-	"oras.land/oras-go/v2/registry/remote/errcode"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 )
 
@@ -497,5 +500,89 @@ func TestTarget_EnsureReferenceNotEmpty(t *testing.T) {
 				t.Errorf("EnsureReferenceNotEmpty() error = %v, want digest error", err)
 			}
 		})
+	}
+}
+
+func TestTarget_NewTarget_remote(t *testing.T) {
+	opts := Target{
+		Remote:       Remote{plainHTTP: plainHTTPNotSpecified},
+		Type:         TargetTypeRemote,
+		RawReference: "localhost:5000/test:v1",
+		Path:         "localhost:5000/test",
+		Reference:    "v1",
+	}
+	got, err := opts.NewTarget(Common{}, logrus.New())
+	if err != nil {
+		t.Fatalf("Target.NewTarget() error = %v", err)
+	}
+	repo, ok := got.(*remote.Repository)
+	if !ok {
+		t.Fatalf("Target.NewTarget() = %T, want *remote.Repository", got)
+	}
+	if want := "localhost:5000/test"; repo.Reference().String() != want {
+		t.Errorf("Target.NewTarget() reference = %q, want %q", repo.Reference().String(), want)
+	}
+}
+
+func TestTarget_NewDeleters_remote(t *testing.T) {
+	opts := Target{
+		Remote:       Remote{plainHTTP: plainHTTPNotSpecified},
+		Type:         TargetTypeRemote,
+		RawReference: "localhost:5000/test:v1",
+		Path:         "localhost:5000/test",
+		Reference:    "v1",
+	}
+	if _, err := opts.NewBlobDeleter(Common{}, logrus.New()); err != nil {
+		t.Errorf("Target.NewBlobDeleter() error = %v", err)
+	}
+	if _, err := opts.NewManifestDeleter(Common{}, logrus.New()); err != nil {
+		t.Errorf("Target.NewManifestDeleter() error = %v", err)
+	}
+}
+
+func TestTarget_NewTarget_remote_invalidReference(t *testing.T) {
+	opts := Target{
+		Remote:       Remote{plainHTTP: plainHTTPNotSpecified},
+		Type:         TargetTypeRemote,
+		RawReference: "invalid reference",
+		Path:         "invalid reference",
+	}
+	if _, err := opts.NewTarget(Common{}, logrus.New()); err == nil {
+		t.Fatal("Target.NewTarget() error = nil, want error")
+	}
+}
+
+func TestTarget_NewReadonlyTarget_remote(t *testing.T) {
+	opts := Target{
+		Remote:       Remote{plainHTTP: plainHTTPNotSpecified},
+		Type:         TargetTypeRemote,
+		RawReference: "localhost:5000/test:v1",
+		Path:         "localhost:5000/test",
+		Reference:    "v1",
+	}
+	got, err := opts.NewReadonlyTarget(context.Background(), Common{}, logrus.New())
+	if err != nil {
+		t.Fatalf("Target.NewReadonlyTarget() error = %v", err)
+	}
+	if _, ok := got.(*remote.Repository); !ok {
+		t.Fatalf("Target.NewReadonlyTarget() = %T, want *remote.Repository", got)
+	}
+}
+
+func TestTarget_Parse_remote_scheme(t *testing.T) {
+	for _, raw := range []string{
+		"http://127.0.0.1:1/repo:tag",
+		"https://localhost:5000/repo",
+		"oci://localhost:5000/repo:tag",
+	} {
+		opts := Target{
+			RawReference: raw,
+			IsOCILayout:  false,
+		}
+		cmd := &cobra.Command{}
+		ApplyFlags(&opts, cmd.Flags())
+		if err := opts.Parse(cmd); err == nil {
+			t.Errorf("expect Target.Parse(%q) to fail but not", raw)
+		}
 	}
 }

@@ -28,14 +28,14 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content"
+	"github.com/oras-project/oras-go/v3/registry"
+	"github.com/oras-project/oras-go/v3/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/registry"
-	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/errcode"
 	"oras.land/oras/cmd/oras/internal/argument"
 	"oras.land/oras/cmd/oras/internal/command"
 	"oras.land/oras/cmd/oras/internal/display"
@@ -837,7 +837,7 @@ func getMountPoint(src oras.ReadOnlyGraphTarget, dst oras.GraphTarget, opts *cop
 	if !srcIsRemote || !dstIsRemote {
 		return "", false
 	}
-	if srcRepo.Reference.Registry != dstRepo.Reference.Registry {
+	if srcRepo.Registry.Reference.Registry != dstRepo.Registry.Reference.Registry {
 		return "", false
 	}
 	srcCred := opts.From.Credential()
@@ -845,5 +845,5 @@ func getMountPoint(src oras.ReadOnlyGraphTarget, dst oras.GraphTarget, opts *cop
 	if srcCred != dstCred {
 		return "", false
 	}
-	return srcRepo.Reference.Repository, true
+	return srcRepo.RepositoryName, true
 }

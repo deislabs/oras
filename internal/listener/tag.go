@@ -20,8 +20,8 @@ import (
 	"io"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/registry"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/registry"
 )
 
 // NewTagListener creates a wrapper type for printing a tag status and hint.

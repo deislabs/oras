@@ -18,19 +18,19 @@ package credential_test
 import (
 	"testing"
 
-	"oras.land/oras-go/v2/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"oras.land/oras/internal/credential"
 )
 
 func Test_Credential_emptyCredential(t *testing.T) {
 	cred := credential.Credential("", "")
-	if cred != auth.EmptyCredential {
+	if cred != credentials.EmptyCredential {
 		t.Fatalf("Expect empty credential but got %v", cred)
 	}
 }
 
 func Test_Credential_usernamePassword(t *testing.T) {
-	expected := auth.Credential{
+	expected := credentials.Credential{
 		Username: "username",
 		Password: "password",
 	}
@@ -41,7 +41,7 @@ func Test_Credential_usernamePassword(t *testing.T) {
 }
 
 func Test_Credential_refreshToken(t *testing.T) {
-	expected := auth.Credential{
+	expected := credentials.Credential{
 		RefreshToken: "mocked",
 	}
 	cred := credential.Credential("", expected.RefreshToken)
