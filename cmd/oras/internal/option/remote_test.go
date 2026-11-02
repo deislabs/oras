@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/retry"
@@ -159,12 +160,10 @@ func TestRemote_authClient_RawCredential(t *testing.T) {
 }
 
 func TestRemote_authClient_SharedCache(t *testing.T) {
-	clearSharedCaches()
-	t.Cleanup(clearSharedCaches)
-
 	opts := Remote{
-		Username: "test-user",
-		Secret:   "test-password",
+		Username:   "test-user",
+		Secret:     "test-password",
+		authCaches: newAuthCacheStore(),
 	}
 	first, err := opts.authClient("hostname", false, false)
 	if err != nil {
@@ -199,15 +198,14 @@ func TestRemote_authClient_SharedCache(t *testing.T) {
 }
 
 func TestRemote_authClient_SharedCacheByCredential(t *testing.T) {
-	clearSharedCaches()
-	t.Cleanup(clearSharedCaches)
-
 	const (
 		registry = "registry.example.com"
 		cacheKey = "repository:test:pull"
 	)
+	store := newAuthCacheStore()
 	newClient := func(t *testing.T, opts Remote) *auth.Client {
 		t.Helper()
+		opts.authCaches = store
 		client, err := opts.authClient(registry, false, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -250,15 +248,13 @@ func TestRemote_authClient_SharedCacheByCredential(t *testing.T) {
 }
 
 func TestRemote_authClient_SharedCacheByConfig(t *testing.T) {
-	clearSharedCaches()
-	t.Cleanup(clearSharedCaches)
-
 	tmp := t.TempDir()
 	configA := filepath.Join(tmp, "a.json")
 	configB := filepath.Join(tmp, "b.json")
+	store := newAuthCacheStore()
 	newCache := func(t *testing.T, configs ...string) auth.Cache {
 		t.Helper()
-		opts := Remote{Configs: configs}
+		opts := Remote{Configs: configs, authCaches: store}
 		client, err := opts.authClient("hostname", false, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -270,6 +266,95 @@ func TestRemote_authClient_SharedCacheByConfig(t *testing.T) {
 	}
 	if newCache(t, configA) == newCache(t, configB) {
 		t.Fatal("expected clients using different registry configs not to share a cache")
+	}
+}
+
+func TestRemote_authClient_InvocationScopedCache(t *testing.T) {
+	const (
+		registry = "registry.example.com"
+		cacheKey = "repository:test:pull"
+	)
+	newClient := func(t *testing.T, store *authCacheStore, opts Remote) *auth.Client {
+		t.Helper()
+		opts.authCaches = store
+		client, err := opts.authClient(registry, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return client
+	}
+
+	// Clients built within the same invocation (same store) with the same
+	// credentials share a cache.
+	store := newAuthCacheStore()
+	from := newClient(t, store, Remote{Username: "user-a", Secret: "password-a"})
+	if _, err := from.Cache.Set(context.Background(), registry, auth.SchemeBearer, cacheKey, func(context.Context) (string, error) {
+		return "token-a", nil
+	}); err != nil {
+		t.Fatalf("unexpected error when populating cache: %v", err)
+	}
+	to := newClient(t, store, Remote{Username: "user-a", Secret: "password-a"})
+	got, err := to.Cache.GetToken(context.Background(), registry, auth.SchemeBearer, cacheKey)
+	if err != nil || got != "token-a" {
+		t.Fatalf("expected shared cache within one invocation, got %q, err %v", got, err)
+	}
+
+	// Clients built in a different invocation (different store) do not share
+	// the cache, even with identical credentials.
+	otherStore := newAuthCacheStore()
+	other := newClient(t, otherStore, Remote{Username: "user-a", Secret: "password-a"})
+	if _, err := other.Cache.GetToken(context.Background(), registry, auth.SchemeBearer, cacheKey); err == nil {
+		t.Fatal("expected cache not to leak across invocations")
+	}
+}
+
+func TestRemote_authClient_SharedCacheWiring(t *testing.T) {
+	const registry = "registry.example.com"
+	newCache := func(t *testing.T, common Common, opts Remote) auth.Cache {
+		t.Helper()
+		opts.plainHTTP = plainHTTPNotSpecified
+		repo, err := opts.NewRepository(registry+"/test", common, logrus.New())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		client, ok := repo.Client.(*auth.Client)
+		if !ok {
+			t.Fatalf("unexpected client type %T", repo.Client)
+		}
+		return client.Cache
+	}
+
+	common := Common{authCaches: newAuthCacheStore()}
+	if got, want := newCache(t, common, Remote{Username: "user-a", Secret: "password-a"}), newCache(t, common, Remote{Username: "user-a", Secret: "password-a"}); got != want {
+		t.Fatal("expected clients with the same credentials in one invocation to share a cache")
+	}
+	if newCache(t, common, Remote{Username: "user-a", Secret: "password-a"}) == newCache(t, common, Remote{Username: "user-b", Secret: "password-b"}) {
+		t.Fatal("expected clients with different credentials not to share a cache")
+	}
+}
+
+func TestRemote_ensureAuthCaches_Reexecution(t *testing.T) {
+	cmd := &cobra.Command{}
+	common := Common{}
+	remote := Remote{}
+	if err := common.Parse(cmd); err != nil {
+		t.Fatal(err)
+	}
+	remote.ensureAuthCaches(common)
+	first := remote.authCaches
+	if first == nil {
+		t.Fatal("expected initial auth cache store")
+	}
+	if err := common.Parse(cmd); err != nil {
+		t.Fatal(err)
+	}
+	remote.ensureAuthCaches(common)
+	if remote.authCaches == first || remote.authCaches != common.authCaches {
+		t.Fatal("expected remote to bind to the new invocation's store")
+	}
+	remote.ensureAuthCaches(Common{})
+	if remote.authCaches != common.authCaches {
+		t.Fatal("missing common store must not reset the remote cache")
 	}
 }
 
