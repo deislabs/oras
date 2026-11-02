@@ -21,8 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/oras-project/oras-go/v3"
@@ -93,7 +91,7 @@ Example - Fetch and print the prettified descriptor of the config:
 	return oerrors.Command(cmd, &opts.Target)
 }
 
-func fetchConfig(cmd *cobra.Command, opts *fetchConfigOptions) (fetchErr error) {
+func fetchConfig(cmd *cobra.Command, opts *fetchConfigOptions) error {
 	ctx, logger := command.GetLogger(cmd, &opts.Common)
 
 	repo, err := opts.NewReadonlyTarget(ctx, opts.Common, logger)
@@ -123,44 +121,19 @@ func fetchConfig(cmd *cobra.Command, opts *fetchConfigOptions) (fetchErr error) 
 			}
 			defer reader.Close()
 
-			var output io.Writer
-			var file *os.File
+			write := func(w io.Writer) error {
+				vr := content.NewVerifyReader(reader, configDesc)
+				if _, err := io.Copy(w, vr); err != nil {
+					return err
+				}
+				return vr.Verify()
+			}
 			if opts.outputPath == "-" {
-				output = cmd.OutOrStdout()
-			} else {
-				file, err = os.CreateTemp(filepath.Dir(opts.outputPath), "oras-config-*")
-				if err != nil {
+				if err := write(cmd.OutOrStdout()); err != nil {
 					return err
 				}
-				defer func() {
-					_ = file.Close()
-					if fetchErr != nil {
-						_ = os.Remove(file.Name())
-					}
-				}()
-				output = file
-			}
-
-			vr := content.NewVerifyReader(reader, configDesc)
-			if _, err = io.Copy(output, vr); err != nil {
+			} else if err := writeOutputFile(opts.outputPath, write); err != nil {
 				return err
-			}
-			if err := vr.Verify(); err != nil {
-				return err
-			}
-			if opts.outputPath != "-" {
-				if err := file.Chmod(0644); err != nil {
-					return err
-				}
-				if err := file.Sync(); err != nil {
-					return err
-				}
-				if err := file.Close(); err != nil {
-					return err
-				}
-				if err := os.Rename(file.Name(), opts.outputPath); err != nil {
-					return err
-				}
 			}
 		} else {
 			contentBytes, err := fetchConfigContent(ctx, src, configDesc)
