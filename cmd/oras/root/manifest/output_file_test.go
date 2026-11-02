@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -106,6 +107,18 @@ func Test_writeOutputFile_failureKeepsOriginal(t *testing.T) {
 	}
 	if got := readFile(t, path); got != "original" {
 		t.Errorf("content = %q, want original", got)
+	}
+	assertNoTempFiles(t, dir, 1)
+}
+
+func Test_writeOutputFile_longBasename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, strings.Repeat("a", 250))
+	if err := writeOutputFile(path, writeString("long")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != "long" {
+		t.Errorf("content = %q", got)
 	}
 	assertNoTempFiles(t, dir, 1)
 }

@@ -18,6 +18,7 @@ limitations under the License.
 package manifest
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -126,4 +127,66 @@ func Test_writeOutputFile_charDevice(t *testing.T) {
 	if info, err := os.Stat("/dev/null"); err != nil || info.Mode().IsRegular() {
 		t.Errorf("/dev/null was damaged: %v, %v", info, err)
 	}
+}
+
+func Test_writeOutputFile_symlinkFailureKeepsTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	link := filepath.Join(dir, "link.json")
+	if err := os.WriteFile(target, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target.json", link); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("digest mismatch")
+	err := writeOutputFile(link, func(w io.Writer) error {
+		_, _ = io.WriteString(w, "partial")
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if got := readFile(t, target); got != "original" {
+		t.Errorf("target content = %q, want original", got)
+	}
+	assertNoTempFiles(t, dir, 2)
+}
+
+func Test_writeOutputFile_danglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink("target.json", link); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeOutputFile(link, writeString("new")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, target); got != "new" {
+		t.Errorf("target content = %q", got)
+	}
+	assertNoTempFiles(t, dir, 2)
+}
+
+func Test_writeOutputFile_readOnlyDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(path, []byte("old content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+	if err := writeOutputFile(path, writeString("new")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != "new" {
+		t.Errorf("content = %q", got)
+	}
+	assertNoTempFiles(t, dir, 1)
 }
