@@ -117,6 +117,36 @@ func (target *Target) Parse(cmd *cobra.Command) error {
 		if len(target.headerFlags) != 0 {
 			return errors.New(errHeaderFlagsOnOCILayout)
 		}
+
+		raw := target.RawReference
+		if atIndex := strings.LastIndex(raw, "@"); atIndex != -1 {
+			digest := raw[atIndex+1:]
+			if !contentutil.IsDigest(digest) {
+				return errors.Join(
+					fmt.Errorf("invalid digest: %q", digest),
+					errdef.ErrInvalidReference,
+				)
+			}
+		} else {
+			colonIndex := strings.LastIndex(raw, ":")
+			slashIndex := strings.LastIndex(raw, "/")
+
+			var tag string
+			if colonIndex > slashIndex {
+				tag = raw[colonIndex+1:]
+			} else if slashIndex == -1 {
+				tag = raw
+			}
+
+			if tag != "" {
+				if err := validateTag(tag); err != nil {
+					return errors.Join(
+						fmt.Errorf("invalid tag: %w", err),
+						errdef.ErrInvalidReference,
+					)
+				}
+			}
+		}
 		target.Reference = target.RawReference
 		return nil
 	default:
@@ -155,6 +185,11 @@ func (target *Target) parseOCILayoutReference() error {
 		path, ref, err = fileref.Parse(raw, "")
 		if err != nil {
 			return errors.Join(err, errdef.ErrInvalidReference)
+		}
+		if ref != "" {
+			if err := validateTag(ref); err != nil {
+				return fmt.Errorf("invalid tag: %w", err)
+			}
 		}
 	}
 	target.Path = path

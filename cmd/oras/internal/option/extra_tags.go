@@ -22,6 +22,11 @@ import (
 	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 )
 
+func validateTag(tag string) error {
+	ref := properties.Reference{Tag: tag}
+	return ref.ValidateTag()
+}
+
 // ValidateExtraTags validates additional destination tags.
 func ValidateExtraTags(tags []string) error {
 	for _, tag := range tags {
@@ -29,8 +34,7 @@ func ValidateExtraTags(tags []string) error {
 			return errors.New("empty extra tag")
 		}
 
-		ref := properties.Reference{Tag: tag}
-		if err := ref.ValidateTag(); err != nil {
+		if err := validateTag(tag); err != nil {
 			return fmt.Errorf("invalid extra tag: %w", err)
 		}
 	}

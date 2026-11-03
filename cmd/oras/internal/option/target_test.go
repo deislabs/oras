@@ -33,17 +33,68 @@ import (
 )
 
 func TestTarget_Parse_oci_path(t *testing.T) {
-	opts := Target{
-		Path:         "foo",
-		RawReference: "mocked/test",
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{
+			name: "reference without tag",
+			raw:  "mocked/test",
+		},
+		{
+			name: "valid tag",
+			raw:  "mocked/test:latest",
+		},
+		{
+			name:    "tag containing space",
+			raw:     "mocked/test:BAD TAG",
+			wantErr: true,
+		},
+		{
+			name:    "tag containing invalid characters",
+			raw:     "mocked/test:bad!tag",
+			wantErr: true,
+		},
+		{
+			name: "digest reference",
+			raw:  "mocked/test@sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+		},
+		{
+			name:    "invalid digest",
+			raw:     "mocked/test@not-a-digest",
+			wantErr: true,
+		},
 	}
-	cmd := &cobra.Command{}
-	ApplyFlags(&opts, cmd.Flags())
-	if err := opts.Parse(cmd); err != nil {
-		t.Errorf("Target.Parse() error = %v", err)
-	}
-	if opts.Type != TargetTypeOCILayout {
-		t.Errorf("Target.Parse() failed, got %q, want %q", opts.Type, TargetTypeOCILayout)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := Target{
+				Path:         "foo",
+				RawReference: tt.raw,
+			}
+			cmd := &cobra.Command{}
+			ApplyFlags(&opts, cmd.Flags())
+
+			err := opts.Parse(cmd)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Target.Parse() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.wantErr {
+				if !errors.Is(err, errdef.ErrInvalidReference) {
+					t.Errorf("Target.Parse() error = %v, want %v", err, errdef.ErrInvalidReference)
+				}
+				return
+			}
+
+			if opts.Type != TargetTypeOCILayout {
+				t.Errorf("Target.Parse() got type %q, want %q", opts.Type, TargetTypeOCILayout)
+			}
+			if opts.Reference != tt.raw {
+				t.Errorf("Target.Parse() got reference %q, want %q", opts.Reference, tt.raw)
+			}
+		})
 	}
 }
 
@@ -152,10 +203,6 @@ func TestTarget_Parse_remote_err(t *testing.T) {
 }
 
 func Test_parseOCILayoutReference(t *testing.T) {
-	opts := Target{
-		RawReference: "/test",
-		IsOCILayout:  false,
-	}
 	tests := []struct {
 		name    string
 		raw     string
@@ -171,15 +218,27 @@ func Test_parseOCILayoutReference(t *testing.T) {
 		{"Empty tag", "path:", "path", "", false},
 		{"path and digest", "path@digest", "path", "digest", false},
 		{"path and tag", "path:tag", "path", "tag", false},
+		{"Invalid tag with space", "path:BAD TAG", "", "", true},
+		{"Invalid tag with invalid character", "path:bad!tag", "", "", true},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts.RawReference = tt.raw
+			opts := Target{RawReference: tt.raw}
 			err := opts.parseOCILayoutReference()
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseOCILayoutReference() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+
+			if tt.wantErr {
+				if !errors.Is(err, errdef.ErrInvalidReference) {
+					t.Errorf("parseOCILayoutReference() error = %v, want %v", err, errdef.ErrInvalidReference)
+				}
+				return
+			}
+
 			if opts.Path != tt.want {
 				t.Errorf("parseOCILayoutReference() got = %v, want %v", opts.Path, tt.want)
 			}
