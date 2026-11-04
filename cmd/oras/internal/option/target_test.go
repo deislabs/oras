@@ -249,6 +249,68 @@ func Test_parseOCILayoutReference(t *testing.T) {
 	}
 }
 
+func Test_parseOCILayoutPathReference(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{
+			name: "reference without tag",
+			raw:  "mocked/test",
+		},
+		{
+			name: "valid tag",
+			raw:  "mocked/test:latest",
+		},
+		{
+			name: "short reference with tag",
+			raw:  "test:v1",
+		},
+		{
+			name:    "tag containing space",
+			raw:     "mocked/test:BAD TAG",
+			wantErr: true,
+		},
+		{
+			name:    "tag containing invalid characters",
+			raw:     "mocked/test:bad!tag",
+			wantErr: true,
+		},
+		{
+			name: "valid digest",
+			raw:  "mocked/test@sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+		},
+		{
+			name:    "invalid digest",
+			raw:     "mocked/test@not-a-digest",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := Target{RawReference: tt.raw}
+			err := opts.parseOCILayoutPathReference()
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseOCILayoutPathReference() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.wantErr {
+				if !errors.Is(err, errdef.ErrInvalidReference) {
+					t.Errorf("parseOCILayoutPathReference() error = %v, want %v", err, errdef.ErrInvalidReference)
+				}
+				return
+			}
+
+			if opts.Reference != tt.raw {
+				t.Errorf("parseOCILayoutPathReference() got reference %q, want %q", opts.Reference, tt.raw)
+			}
+		})
+	}
+}
+
 func TestTarget_ModifyError_ociLayout(t *testing.T) {
 	errClient := errors.New("client error")
 	opts := &Target{}

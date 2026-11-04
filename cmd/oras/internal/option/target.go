@@ -118,37 +118,7 @@ func (target *Target) Parse(cmd *cobra.Command) error {
 			return errors.New(errHeaderFlagsOnOCILayout)
 		}
 
-		raw := target.RawReference
-		if atIndex := strings.LastIndex(raw, "@"); atIndex != -1 {
-			digest := raw[atIndex+1:]
-			if !contentutil.IsDigest(digest) {
-				return errors.Join(
-					fmt.Errorf("invalid digest: %q", digest),
-					errdef.ErrInvalidReference,
-				)
-			}
-		} else {
-			colonIndex := strings.LastIndex(raw, ":")
-			slashIndex := strings.LastIndex(raw, "/")
-
-			var tag string
-			if colonIndex > slashIndex {
-				tag = raw[colonIndex+1:]
-			} else if slashIndex == -1 {
-				tag = raw
-			}
-
-			if tag != "" {
-				if err := validateTag(tag); err != nil {
-					return errors.Join(
-						fmt.Errorf("invalid tag: %w", err),
-						errdef.ErrInvalidReference,
-					)
-				}
-			}
-		}
-		target.Reference = target.RawReference
-		return nil
+		return target.parseOCILayoutPathReference()
 	default:
 		target.Type = TargetTypeRemote
 		ref, err := repository.ParseReference(target.RawReference)
@@ -188,12 +158,45 @@ func (target *Target) parseOCILayoutReference() error {
 		}
 		if ref != "" {
 			if err := validateTag(ref); err != nil {
-				return fmt.Errorf("invalid tag: %w", err)
+				return err
 			}
 		}
 	}
 	target.Path = path
 	target.Reference = ref
+	return nil
+}
+
+// parseOCILayoutPathReference validates the reference for an OCI layout path.
+func (target *Target) parseOCILayoutPathReference() error {
+	raw := target.RawReference
+	if atIndex := strings.LastIndex(raw, "@"); atIndex != -1 {
+		digest := raw[atIndex+1:]
+		if !contentutil.IsDigest(digest) {
+			return errors.Join(
+				fmt.Errorf("invalid digest: %q", digest),
+				errdef.ErrInvalidReference,
+			)
+		}
+	} else {
+		colonIndex := strings.LastIndex(raw, ":")
+		slashIndex := strings.LastIndex(raw, "/")
+
+		var tag string
+		if colonIndex > slashIndex {
+			tag = raw[colonIndex+1:]
+		} else if slashIndex == -1 {
+			tag = raw
+		}
+
+		if tag != "" {
+			if err := validateTag(tag); err != nil {
+				return err
+			}
+		}
+	}
+
+	target.Reference = raw
 	return nil
 }
 
