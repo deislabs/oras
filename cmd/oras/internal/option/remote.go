@@ -28,7 +28,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/oras-project/oras-go/v3/errdef"
 	"github.com/oras-project/oras-go/v3/registry/remote"
@@ -43,6 +42,7 @@ import (
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
 	"oras.land/oras/internal/credential"
 	"oras.land/oras/internal/crypto"
+	"oras.land/oras/internal/logutil"
 	onet "oras.land/oras/internal/net"
 	"oras.land/oras/internal/repository"
 	"oras.land/oras/internal/trace"
@@ -103,7 +103,7 @@ type Remote struct {
 	applyDistributionSpec bool
 	headerFlags           []string
 	headers               http.Header
-	warned                map[string]*sync.Map
+	warned                map[string]func(remote.Warning)
 	plainHTTP             func() (plainHTTP bool, enforced bool)
 	store                 credentials.Store
 	authCaches            *authCacheStore
@@ -540,21 +540,18 @@ func (remo *Remote) Credential() credentials.Credential {
 	return credential.Credential(remo.Username, remo.Secret)
 }
 
-func (remo *Remote) handleWarning(registry string, logger logrus.FieldLogger) func(warning remote.Warning) {
+// warningHandler returns the warning handler for registry. Handlers are cached
+// per registry so that each distinct warning is logged once per registry.
+func (remo *Remote) warningHandler(registry string, logger logrus.FieldLogger) func(warning remote.Warning) {
 	if remo.warned == nil {
-		remo.warned = make(map[string]*sync.Map)
+		remo.warned = make(map[string]func(remote.Warning))
 	}
-	warned := remo.warned[registry]
-	if warned == nil {
-		warned = &sync.Map{}
-		remo.warned[registry] = warned
+	handler := remo.warned[registry]
+	if handler == nil {
+		handler = remote.NewWarningLogger(registry, logutil.NewSlogLogger(logger))
+		remo.warned[registry] = handler
 	}
-	logger = logger.WithField("registry", registry)
-	return func(warning remote.Warning) {
-		if _, loaded := warned.LoadOrStore(warning.WarningValue, struct{}{}); !loaded {
-			logger.Warn(warning.Text)
-		}
-	}
+	return handler
 }
 
 // NewRegistry assembles a oras remote registry.
@@ -571,7 +568,7 @@ func (remo *Remote) NewRegistry(registry string, common Common, logger logrus.Fi
 	}
 	registry = reg.Reference.Registry
 	reg.PlainHTTP = remo.isPlainHTTP(registry)
-	reg.HandleWarning = remo.handleWarning(registry, logger)
+	reg.HandleWarning = remo.warningHandler(registry, logger)
 	remo.ensureAuthCaches(common)
 	if reg.Client, err = remo.authClient(reg.Reference.Host(), reg.PlainHTTP, common.Debug); err != nil {
 		return nil, err
@@ -596,7 +593,7 @@ func (remo *Remote) NewRepository(reference string, common Common, logger logrus
 	}
 	registry := repo.Registry.Reference.Registry
 	repo.Registry.PlainHTTP = remo.isPlainHTTP(registry)
-	repo.Registry.HandleWarning = remo.handleWarning(registry, logger)
+	repo.Registry.HandleWarning = remo.warningHandler(registry, logger)
 	remo.ensureAuthCaches(common)
 	if repo.Registry.Client, err = remo.authClient(repo.Reference().Host(), repo.Registry.PlainHTTP, common.Debug); err != nil {
 		return nil, err

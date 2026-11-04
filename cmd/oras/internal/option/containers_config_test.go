@@ -30,10 +30,12 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	"github.com/oras-project/oras-go/v3/errdef"
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	remoteconfig "github.com/oras-project/oras-go/v3/registry/remote/config"
 	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 )
 
 // useContainersConfig enables the containers configuration for the test and
@@ -116,6 +118,31 @@ func TestRemote_NewRepository_containersConfigRewrite(t *testing.T) {
 	}
 	if !repo.SkipReferrersGC {
 		t.Error("SkipReferrersGC = false, want true")
+	}
+}
+
+func TestRemote_containersConfigWarningDedup(t *testing.T) {
+	useContainersConfig(t, rewriteRegistriesConf)
+	logger, hook := test.NewNullLogger()
+	opts := Remote{plainHTTP: plainHTTPNotSpecified}
+	repo, err := opts.NewRepository("alias.example/team/app", Common{}, logger)
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	reg, err := opts.NewRegistry("localhost:5000", Common{}, logger)
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	warning := remote.Warning{WarningValue: remote.WarningValue{Code: 299, Agent: "-", Text: "foo"}}
+	repo.Registry.HandleWarning(warning)
+	reg.HandleWarning(warning)
+
+	entries := hook.AllEntries()
+	if len(entries) != 1 {
+		t.Fatalf("got %d log entries, want 1: %v", len(entries), entries)
+	}
+	if got, want := entries[0].Data["registry"], "localhost:5000"; got != want {
+		t.Errorf("registry = %v, want %v", got, want)
 	}
 }
 

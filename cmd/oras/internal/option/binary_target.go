@@ -19,9 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 
 	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	oerrors "oras.land/oras/cmd/oras/internal/errors"
@@ -61,7 +61,7 @@ func (target *BinaryTarget) ApplyFlags(fs *pflag.FlagSet) {
 
 // Parse parses user-provided flags and arguments into option struct.
 func (target *BinaryTarget) Parse(cmd *cobra.Command) error {
-	target.From.warned = make(map[string]*sync.Map)
+	target.From.warned = make(map[string]func(remote.Warning))
 	target.To.warned = target.From.warned
 	// resolve are parsed in array order, latter will overwrite former
 	target.From.resolveFlag = slices.Concat(target.resolveFlag, target.From.resolveFlag)
