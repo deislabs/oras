@@ -156,11 +156,6 @@ func (target *Target) parseOCILayoutReference() error {
 		if err != nil {
 			return errors.Join(err, errdef.ErrInvalidReference)
 		}
-		if ref != "" {
-			if err := validateTag(ref); err != nil {
-				return err
-			}
-		}
 	}
 	target.Path = path
 	target.Reference = ref
@@ -177,22 +172,6 @@ func (target *Target) parseOCILayoutPathReference() error {
 				fmt.Errorf("invalid digest: %q", digest),
 				errdef.ErrInvalidReference,
 			)
-		}
-	} else {
-		colonIndex := strings.LastIndex(raw, ":")
-		slashIndex := strings.LastIndex(raw, "/")
-
-		var tag string
-		if colonIndex > slashIndex {
-			tag = raw[colonIndex+1:]
-		} else if slashIndex == -1 {
-			tag = raw
-		}
-
-		if tag != "" {
-			if err := validateTag(tag); err != nil {
-				return err
-			}
 		}
 	}
 

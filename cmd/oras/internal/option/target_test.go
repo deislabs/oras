@@ -49,12 +49,12 @@ func TestTarget_Parse_oci_path(t *testing.T) {
 		{
 			name:    "tag containing space",
 			raw:     "mocked/test:BAD TAG",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name:    "tag containing invalid characters",
 			raw:     "mocked/test:bad!tag",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "digest reference",
@@ -218,8 +218,9 @@ func Test_parseOCILayoutReference(t *testing.T) {
 		{"Empty tag", "path:", "path", "", false},
 		{"path and digest", "path@digest", "path", "digest", false},
 		{"path and tag", "path:tag", "path", "tag", false},
-		{"Invalid tag with space", "path:BAD TAG", "", "", true},
-		{"Invalid tag with invalid character", "path:bad!tag", "", "", true},
+		{"Invalid tag with space", "path:BAD TAG", "path", "BAD TAG", false},
+		{"Invalid tag with invalid character", "path:bad!tag", "path", "bad!tag", false},
+		{"Valid OCI layout reference with build metadata", "path:1.0.0+build", "path", "1.0.0+build", false},
 	}
 
 	for _, tt := range tests {
@@ -270,12 +271,12 @@ func Test_parseOCILayoutPathReference(t *testing.T) {
 		{
 			name:    "tag containing space",
 			raw:     "mocked/test:BAD TAG",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name:    "tag containing invalid characters",
 			raw:     "mocked/test:bad!tag",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "valid digest",
