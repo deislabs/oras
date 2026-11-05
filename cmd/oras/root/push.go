@@ -136,7 +136,7 @@ Example - Push file "hi.txt" into an OCI image layout folder 'layout-dir' with t
 			if opts.Target.Type == option.TargetTypeOCILayout {
 				if opts.IsOCILayout {
 					if opts.Reference != "" && !strings.Contains(opts.RawReference, "@") {
-						if err := option.ValidateOCILayoutPathReference(opts.Reference); err != nil {
+						if err := option.ValidateOCILayoutTag(opts.Reference); err != nil {
 							return err
 						}
 					}

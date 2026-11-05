@@ -132,6 +132,20 @@ func Test_pushCmd_invalidOCILayoutReference(t *testing.T) {
 	}
 }
 
+func Test_pushCmd_invalidOCILayoutReferenceWithSlash(t *testing.T) {
+	cmd := pushCmd()
+	cmd.SetArgs([]string{
+		"--oci-layout",
+		filepath.Join(t.TempDir(), "layout") + ":foo/bar",
+		"hi.txt",
+	})
+
+	err := cmd.Execute()
+	if err == nil || err.Error() != `invalid reference: invalid tag "foo/bar"` {
+		t.Fatalf("got error %v, want invalid tag reference error", err)
+	}
+}
+
 func Test_doPushCommand_fileLoadingError(t *testing.T) {
 	ctx := context.Background()
 	wantErr := stderrors.New("file loading failed")

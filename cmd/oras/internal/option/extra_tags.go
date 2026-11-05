@@ -28,6 +28,11 @@ func validateTag(tag string) error {
 	return ref.ValidateTag()
 }
 
+// ValidateOCILayoutTag validates an OCI layout tag.
+func ValidateOCILayoutTag(tag string) error {
+	return validateTag(tag)
+}
+
 // ValidateOCILayoutPathReference validates an OCI layout path reference.
 func ValidateOCILayoutPathReference(raw string) error {
 	if raw == "" {
