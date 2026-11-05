@@ -123,7 +123,7 @@ func (remo *Remote) newConfiguredRepository(reference string, common Common, log
 
 	registry := repo.Registry.Reference.Registry
 	repo.Registry.PlainHTTP = remo.isPlainHTTP(registry)
-	repo.Registry.HandleWarning = remo.handleWarning(registry, logger)
+	repo.Registry.HandleWarning = remo.warningHandler(registry, logger)
 	if repo.Registry.Client, err = remo.authClientWithProperties(repo.Reference().Host(), repo.Registry.PlainHTTP, common.Debug, props, fallbackStore); err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (remo *Remote) newConfiguredRegistry(registry string, common Common, logger
 		return nil, err
 	}
 	reg.PlainHTTP = remo.isPlainHTTP(registry)
-	reg.HandleWarning = remo.handleWarning(registry, logger)
+	reg.HandleWarning = remo.warningHandler(registry, logger)
 	if reg.Client, err = remo.authClientWithProperties(reg.Reference.Host(), reg.PlainHTTP, common.Debug, props, remo.containersCredentialStore(configs)); err != nil {
 		return nil, err
 	}

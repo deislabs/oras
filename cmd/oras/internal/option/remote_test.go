@@ -37,11 +37,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -1310,5 +1312,59 @@ func TestRemote_NewRegistry_scheme(t *testing.T) {
 	}
 	if _, err := opts.NewRepository("http://localhost:5000/repo", Common{}, logrus.New()); err == nil {
 		t.Fatal("expect NewRepository to reject a URL scheme")
+	}
+}
+
+func TestRemote_warningHandler(t *testing.T) {
+	logger, hook := test.NewNullLogger()
+	opts := Remote{plainHTTP: plainHTTPNotSpecified}
+	newWarning := func(text string) remote.Warning {
+		return remote.Warning{WarningValue: remote.WarningValue{Code: 299, Agent: "-", Text: text}}
+	}
+
+	// handlers for the same registry share dedup state across clients
+	repo, err := opts.NewRepository("localhost:5000/repo", Common{}, logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	reg, err := opts.NewRegistry("localhost:5000", Common{}, logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	repo.Registry.HandleWarning(newWarning("foo"))
+	repo.Registry.HandleWarning(newWarning("foo"))
+	reg.HandleWarning(newWarning("foo"))
+	reg.HandleWarning(newWarning("bar"))
+
+	// a different registry logs separately
+	other, err := opts.NewRegistry("localhost:6000", Common{}, logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	other.HandleWarning(newWarning("foo"))
+	other.HandleWarning(newWarning("foo"))
+
+	want := []struct {
+		registry string
+		text     string
+	}{
+		{"localhost:5000", "foo"},
+		{"localhost:5000", "bar"},
+		{"localhost:6000", "foo"},
+	}
+	entries := hook.AllEntries()
+	if len(entries) != len(want) {
+		t.Fatalf("got %d log entries, want %d: %v", len(entries), len(want), entries)
+	}
+	for i, w := range want {
+		if entries[i].Level != logrus.WarnLevel {
+			t.Errorf("entry %d level = %v, want %v", i, entries[i].Level, logrus.WarnLevel)
+		}
+		if entries[i].Message != w.text {
+			t.Errorf("entry %d message = %q, want %q", i, entries[i].Message, w.text)
+		}
+		if got := entries[i].Data["registry"]; got != w.registry {
+			t.Errorf("entry %d registry = %v, want %v", i, got, w.registry)
+		}
 	}
 }
