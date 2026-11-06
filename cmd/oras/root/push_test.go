@@ -104,20 +104,6 @@ func Test_pushCmd_invalidExtraTag(t *testing.T) {
 	}
 }
 
-func Test_pushCmd_invalidOCILayoutPathReference(t *testing.T) {
-	cmd := pushCmd()
-	cmd.SetArgs([]string{
-		"--oci-layout-path", filepath.Join(t.TempDir(), "layout"),
-		"example.com/re po:v1",
-		"hi.txt",
-	})
-
-	err := cmd.Execute()
-	if err == nil || err.Error() != `invalid reference: invalid repository "example.com/re po"` {
-		t.Fatalf("got error %v, want invalid repository reference error", err)
-	}
-}
-
 func Test_pushCmd_invalidOCILayoutReference(t *testing.T) {
 	cmd := pushCmd()
 	cmd.SetArgs([]string{

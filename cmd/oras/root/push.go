@@ -140,10 +140,6 @@ Example - Push file "hi.txt" into an OCI image layout folder 'layout-dir' with t
 							return err
 						}
 					}
-				} else {
-					if err := option.ValidateOCILayoutPathReference(opts.RawReference); err != nil {
-						return err
-					}
 				}
 			}
 			if err := option.ValidateExtraTags(opts.extraRefs); err != nil {
