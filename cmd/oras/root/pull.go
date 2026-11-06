@@ -53,6 +53,7 @@ type pullOptions struct {
 	IncludeSubject    bool
 	PathTraversal     bool
 	Output            string
+	OutputArchive     string
 	ManifestConfigRef string
 	// Deprecated: verbose is deprecated and will be removed in the future.
 	verbose bool
@@ -99,6 +100,9 @@ Example - Pull artifact files from an OCI image layout folder 'layout-dir':
 Example - Pull artifact files from an OCI layout archive 'layout.tar':
   oras pull --oci-layout layout.tar:v1
 
+Example - Pull artifact files directly into a reproducible ZIP archive:
+  oras pull localhost:5000/hello:v1 --output-archive hello.zip
+
 Example - Pull artifact files tagged 'example.com:v1' from an OCI image layout folder 'layout-dir':
   oras pull example.com:v1 --oci-layout-path layout-dir
 `,
@@ -109,7 +113,7 @@ Example - Pull artifact files tagged 'example.com:v1' from an OCI image layout f
 			if err != nil {
 				return err
 			}
-			opts.DisableTTY(opts.Debug, false)
+			opts.DisableTTY(opts.Debug || opts.OutputArchive != "", false)
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -122,12 +126,16 @@ Example - Pull artifact files tagged 'example.com:v1' from an OCI image layout f
 	cmd.Flags().BoolVarP(&opts.PathTraversal, "allow-path-traversal", "T", false, "allow storing files out of the output directory")
 	cmd.Flags().BoolVarP(&opts.IncludeSubject, "include-subject", "", false, "recursively pull the subject of artifacts")
 	cmd.Flags().StringVarP(&opts.Output, "output", "o", ".", "output directory")
+	cmd.Flags().StringVar(&opts.OutputArchive, "output-archive", "", "save files directly to a reproducible ZIP archive (regular files and directories; links are unsupported)")
 	cmd.Flags().StringVarP(&opts.ManifestConfigRef, "config", "", "", "output manifest config file")
 	cmd.Flags().IntVarP(&opts.concurrency, "concurrency", "", 3, "concurrency level")
 	cmd.Flags().BoolVarP(&opts.verbose, "verbose", "v", true, "print status output for unnamed blobs")
 	_ = cmd.Flags().MarkDeprecated("verbose", "and will be removed in a future release.")
 	opts.SetTypes(option.FormatTypeText, option.FormatTypeJSON, option.FormatTypeGoTemplate)
 	option.ApplyFlags(&opts, cmd.Flags())
+	cmd.MarkFlagsMutuallyExclusive("output-archive", "output")
+	cmd.MarkFlagsMutuallyExclusive("output-archive", "allow-path-traversal")
+	cmd.MarkFlagsMutuallyExclusive("output-archive", "format")
 	return oerrors.Command(cmd, &opts.Target)
 }
 
@@ -213,6 +221,9 @@ func runPull(cmd *cobra.Command, opts *pullOptions) (pullError error) {
 	src, err := opts.CachedTarget(target)
 	if err != nil {
 		return err
+	}
+	if opts.OutputArchive != "" {
+		return runPullArchive(ctx, src, opts, metadataHandler, statusHandler)
 	}
 
 	cleanup, err := newPullCleanup(opts.Output)
