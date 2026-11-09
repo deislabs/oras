@@ -16,28 +16,25 @@ limitations under the License.
 package option
 
 import (
-	"os"
-
 	"github.com/oras-project/oras-go/v3"
-	"github.com/oras-project/oras-go/v3/content/oci"
-	"oras.land/oras/internal/cache"
+	"github.com/oras-project/oras-go/v3/content/cache"
 )
 
 type Cache struct {
 	Root string
 }
 
-// CachedTarget gets the target storage with caching if cache root is specified.
+// CachedTarget gets the target storage with caching if the ORAS_CACHE
+// environment variable sets a cache root. The cache is backed by oras-go's
+// content/cache, which keeps the source's ReferenceFetcher, ReferenceParser
+// and ReferrerLister interfaces and stores content with the process-safe
+// oci.NewStorage.
 func (opts *Cache) CachedTarget(src oras.ReadOnlyTarget) (oras.ReadOnlyTarget, error) {
-	opts.Root = os.Getenv("ORAS_CACHE")
-	if opts.Root != "" {
-		// Storage does not maintain index.json, so a cache root shared by
-		// concurrent oras processes cannot corrupt it, unlike with oci.New.
-		ociStore, err := oci.NewStorage(opts.Root)
-		if err != nil {
-			return nil, err
-		}
-		return cache.New(src, ociStore), nil
+	c := cache.NewFromEnv()
+	if c == nil {
+		opts.Root = ""
+		return src, nil
 	}
-	return src, nil
+	opts.Root = c.Root
+	return c.ReadOnlyTarget(src)
 }
