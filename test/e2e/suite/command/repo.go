@@ -78,7 +78,7 @@ var _ = Describe("ORAS beginners:", func() {
 		When("running `repo tags`", func() {
 			It("should show help description with feature flags", func() {
 				out := ORAS("repo", "tags", "--help").MatchKeyWords(ExampleDesc).Exec().Out
-				Expect(out).Should(gbytes.Say("--exclude-digest-tags\\s+%s", regexp.QuoteMeta(feature.Preview.Mark)))
+				Expect(out).Should(gbytes.Say("--exclude-digest-tags(\\[=true\\|false\\])?\\s+%s", regexp.QuoteMeta(feature.Preview.Mark)))
 			})
 
 			It("should call sub-commands with aliases", func() {
