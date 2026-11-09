@@ -49,7 +49,7 @@ var _ = Describe("ORAS beginners:", func() {
 			out := ORAS("cp", "--help").MatchKeyWords("Copy", ExampleDesc).Exec().Out
 			Expect(out).Should(gbytes.Say("--from-distribution-spec string\\s+%s", regexp.QuoteMeta(feature.Preview.Mark)))
 			Expect(out).Should(gbytes.Say("--from-oci-layout-path string\\s+%s", regexp.QuoteMeta(feature.Experimental.Mark)))
-			Expect(out).Should(gbytes.Say("-r, --recursive\\s+%s", regexp.QuoteMeta(feature.Preview.Mark)))
+			Expect(out).Should(gbytes.Say("-r, --recursive(\\[=true\\|false\\])?\\s+%s", regexp.QuoteMeta(feature.Preview.Mark)))
 			Expect(out).Should(gbytes.Say("--to-distribution-spec string\\s+%s", regexp.QuoteMeta(feature.Preview.Mark)))
 			Expect(out).Should(gbytes.Say("--to-oci-layout-path string\\s+%s", regexp.QuoteMeta(feature.Experimental.Mark)))
 		})
