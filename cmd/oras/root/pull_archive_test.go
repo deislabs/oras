@@ -369,3 +369,74 @@ func TestPullArchive_FlagConflicts(t *testing.T) {
 		}
 	}
 }
+
+func TestSavePullArchive_Permissions(t *testing.T) {
+	dir := t.TempDir()
+	reference := filepath.Join(dir, "reference")
+	if err := os.WriteFile(reference, nil, 0666); err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.Stat(reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, keepOld := range []bool{false, true} {
+		name := filepath.Join(t.TempDir(), "archive.zip")
+		if err := savePullArchive(name, keepOld, func(w io.Writer) error {
+			_, err := io.WriteString(w, "archive")
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.Stat(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Mode().Perm() != want.Mode().Perm() {
+			t.Fatalf("keep old = %v: permissions = %v, want %v", keepOld, got.Mode().Perm(), want.Mode().Perm())
+		}
+	}
+}
+
+type archiveSkippedMetadata struct {
+	pullMetadataHandler
+	skipped []ocispec.Descriptor
+}
+
+func (h *archiveSkippedMetadata) OnLayerSkipped(desc ocispec.Descriptor) error {
+	h.skipped = append(h.skipped, desc)
+	return nil
+}
+
+func TestCollectPullArchive_UnnamedSuccessorWithChildren(t *testing.T) {
+	src := memory.New()
+	layer := archiveBlob(t, src, "named.txt", "text/plain", []byte("file"))
+	nested := archiveManifest(t, src, []ocispec.Descriptor{layer}, nil, ocispec.DescriptorEmptyJSON)
+	root := archiveManifest(t, src, []ocispec.Descriptor{nested}, nil, ocispec.DescriptorEmptyJSON)
+	metadata := &archiveSkippedMetadata{}
+	files, err := collectPullArchive(t.Context(), src, root, &pullOptions{}, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Digest != layer.Digest {
+		t.Fatalf("collected files = %v", files)
+	}
+	if len(metadata.skipped) != 1 || metadata.skipped[0].Digest != nested.Digest {
+		t.Fatalf("unnamed successor not reported: %v", metadata.skipped)
+	}
+}
+
+func TestCollectPullArchive_PreservesConfigAnnotations(t *testing.T) {
+	src := memory.New()
+	config := archiveBlob(t, src, "", "application/json", []byte(`{"answer":42}`))
+	config.Annotations = map[string]string{"example.com/retained": "value"}
+	root := archiveManifest(t, src, nil, nil, config)
+	files, err := collectPullArchive(t.Context(), src, root, &pullOptions{ManifestConfigRef: "config.json"}, pullMetadataHandler{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"example.com/retained": "value", ocispec.AnnotationTitle: "config.json"}
+	if len(files) != 1 || !maps.Equal(files[0].Annotations, want) {
+		t.Fatalf("config annotations = %v, want %v", files, want)
+	}
+}

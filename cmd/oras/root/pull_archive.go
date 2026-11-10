@@ -86,6 +86,10 @@ func collectPullArchive(ctx context.Context, src content.Fetcher, root ocispec.D
 				return nil, fmt.Errorf("conflicting archive entries for %q", name)
 			}
 			files[name] = node
+		} else if node.Digest != root.Digest && !content.Equal(node, ocispec.DescriptorEmptyJSON) {
+			if err := metadataHandler.OnLayerSkipped(node); err != nil {
+				return nil, err
+			}
 		}
 		// Record aliases before deduplicating graph traversal by digest.
 		if visited[node.Digest] {
@@ -99,19 +103,17 @@ func collectPullArchive(ctx context.Context, src content.Fetcher, root ocispec.D
 		if config != nil && !configSeen {
 			configSeen = true
 			if configName != "" && (configType == "" || config.MediaType == configType) {
-				config.Annotations = map[string]string{ocispec.AnnotationTitle: configName}
+				if config.Annotations == nil {
+					config.Annotations = make(map[string]string)
+				}
+				config.Annotations[ocispec.AnnotationTitle] = configName
 			}
 		}
-		if config != nil && config.Annotations[ocispec.AnnotationTitle] != "" {
+		if config != nil && (config.Size != ocispec.DescriptorEmptyJSON.Size || config.Digest != ocispec.DescriptorEmptyJSON.Digest || config.Annotations[ocispec.AnnotationTitle] != "") {
 			nodes = append(nodes, *config)
 		}
 		if subject != nil && opts.IncludeSubject {
 			nodes = append(nodes, *subject)
-		}
-		if node.Digest != root.Digest && len(nodes) == 0 && node.Annotations[ocispec.AnnotationTitle] == "" && !content.Equal(node, ocispec.DescriptorEmptyJSON) {
-			if err := metadataHandler.OnLayerSkipped(node); err != nil {
-				return nil, err
-			}
 		}
 		pending = append(pending, nodes...)
 	}
@@ -132,7 +134,15 @@ func savePullArchive(filename string, keepOld bool, write func(io.Writer) error)
 	if keepOld {
 		f, err = os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	} else {
-		f, err = os.CreateTemp(filepath.Dir(filename), ".oras-archive-*")
+		var stagingDir string
+		stagingDir, err = os.MkdirTemp(filepath.Dir(filename), ".oras-archive-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(stagingDir)
+		// OpenFile applies the caller's umask, just as the keep-old-files path
+		// does. A private directory keeps staged bytes private until rename.
+		f, err = os.OpenFile(filepath.Join(stagingDir, "archive.zip"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	}
 	if err != nil {
 		return err
