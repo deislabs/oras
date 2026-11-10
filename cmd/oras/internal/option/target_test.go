@@ -47,12 +47,12 @@ func TestTarget_Parse_oci_path(t *testing.T) {
 			raw:  "mocked/test:latest",
 		},
 		{
-			name:    "tag containing space",
+			name:    "tag containing space passes parse",
 			raw:     "mocked/test:BAD TAG",
 			wantErr: false,
 		},
 		{
-			name:    "tag containing invalid characters",
+			name:    "tag containing invalid characters passes parse",
 			raw:     "mocked/test:bad!tag",
 			wantErr: false,
 		},
@@ -269,12 +269,20 @@ func Test_parseOCILayoutPathReference(t *testing.T) {
 			raw:  "test:v1",
 		},
 		{
-			name:    "tag containing space",
+			name: "reference with registry port",
+			raw:  "localhost:5000/hello:v1",
+		},
+		{
+			name: "uppercase reference",
+			raw:  "MyRepo:v1",
+		},
+		{
+			name:    "tag containing space passes parse",
 			raw:     "mocked/test:BAD TAG",
 			wantErr: false,
 		},
 		{
-			name:    "tag containing invalid characters",
+			name:    "tag containing invalid characters passes parse",
 			raw:     "mocked/test:bad!tag",
 			wantErr: false,
 		},
