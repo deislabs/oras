@@ -31,7 +31,9 @@ type Cache struct {
 func (opts *Cache) CachedTarget(src oras.ReadOnlyTarget) (oras.ReadOnlyTarget, error) {
 	opts.Root = os.Getenv("ORAS_CACHE")
 	if opts.Root != "" {
-		ociStore, err := oci.New(opts.Root)
+		// Storage does not maintain index.json, so a cache root shared by
+		// concurrent oras processes cannot corrupt it, unlike with oci.New.
+		ociStore, err := oci.NewStorage(opts.Root)
 		if err != nil {
 			return nil, err
 		}
