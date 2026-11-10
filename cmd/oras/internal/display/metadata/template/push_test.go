@@ -129,3 +129,25 @@ func TestPushHandler_Render_untaggedLen(t *testing.T) {
 		t.Errorf("Render() = %q, want %q", got, want)
 	}
 }
+
+// `oras push localhost:5000/test` parses to a target whose raw reference is
+// the repository and whose reference is empty. Nothing was tagged, so no
+// reference must be reported as a tag.
+func TestPushHandler_Render_untaggedRawReference(t *testing.T) {
+	buf := &bytes.Buffer{}
+	handler := NewPushHandler(buf, "{{len .referenceAsTags}}").(*PushHandler)
+
+	opts := &option.Target{
+		RawReference: "localhost:5000/test",
+		Path:         "localhost:5000/test",
+	}
+	if err := handler.OnCopied(opts, testDescriptor); err != nil {
+		t.Fatalf("OnCopied() error = %v, want nil", err)
+	}
+	if err := handler.Render(); err != nil {
+		t.Fatalf("Render() error = %v, want nil", err)
+	}
+	if got, want := buf.String(), "0"; got != want {
+		t.Errorf("Render() = %q, want %q", got, want)
+	}
+}

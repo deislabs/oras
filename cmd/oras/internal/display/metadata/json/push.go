@@ -49,7 +49,9 @@ func (ph *PushHandler) OnTagged(_ ocispec.Descriptor, tag string) error {
 
 // OnCopied is called after files are copied.
 func (ph *PushHandler) OnCopied(opts *option.Target, root ocispec.Descriptor) error {
-	if opts.RawReference != "" && !contentutil.IsDigest(opts.Reference) {
+	// The reference is empty for an untagged push and is not a tag when it is
+	// a digest.
+	if opts.Reference != "" && !contentutil.IsDigest(opts.Reference) {
 		ph.tagged.AddTag(opts.Reference)
 	}
 	ph.path = opts.Path

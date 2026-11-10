@@ -253,6 +253,15 @@ var _ = Describe("Remote registry users:", func() {
 			Expect(json.Unmarshal(out, &struct{}{})).ShouldNot(HaveOccurred())
 		})
 
+		It("should push files without tag and report no tags", func() {
+			repo := pushTestRepo("untagged-format")
+			tempDir := PrepareTempFiles()
+
+			ORAS("push", RegistryRef(ZOTHost, repo, ""), foobar.FileBarName, "--format", "go-template={{len .referenceAsTags}}").
+				MatchContent("0").
+				WithWorkDir(tempDir).Exec()
+		})
+
 		It("should push files with customized media types", func() {
 			repo := pushTestRepo("layer-mediatype")
 			layerType := "layer/type"
