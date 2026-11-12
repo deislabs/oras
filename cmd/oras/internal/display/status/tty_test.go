@@ -397,3 +397,107 @@ func TestTTYBlobPushHandler_reportsStates(t *testing.T) {
 		t.Errorf("reported states = %v, want %v", tracked.states, want)
 	}
 }
+
+func TestTTYHandlers_unstartedTrackingReturnsError(t *testing.T) {
+	fetcher := testutils.NewMockFetcher()
+
+	t.Run("TTYPushHandler", func(t *testing.T) {
+		ph := NewTTYPushHandler(nil, fetcher.Fetcher)
+		if err := ph.OnCopySkipped(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("OnCopySkipped() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := ph.PostCopy(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("PostCopy() error = %v, want %v", err, errTrackingNotStarted)
+		}
+	})
+
+	t.Run("TTYPullHandler", func(t *testing.T) {
+		ph := NewTTYPullHandler(nil)
+		if err := ph.OnNodeRestored(fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("OnNodeRestored() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := ph.OnNodeSkipped(fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("OnNodeSkipped() error = %v, want %v", err, errTrackingNotStarted)
+		}
+	})
+
+	t.Run("TTYCopyHandler", func(t *testing.T) {
+		ch := NewTTYCopyHandler(nil, fetcher.Fetcher)
+		if err := ch.StopTracking(); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("StopTracking() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := ch.OnCopySkipped(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("OnCopySkipped() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := ch.OnMounted(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("OnMounted() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := ch.PostCopy(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("PostCopy() error = %v, want %v", err, errTrackingNotStarted)
+		}
+	})
+
+	t.Run("TTYBackupHandler", func(t *testing.T) {
+		bh := NewTTYBackupHandler(nil, fetcher.Fetcher)
+		if err := bh.StopTracking(); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("StopTracking() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := bh.OnCopySkipped(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("OnCopySkipped() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := bh.PostCopy(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("PostCopy() error = %v, want %v", err, errTrackingNotStarted)
+		}
+	})
+
+	t.Run("TTYRestoreHandler", func(t *testing.T) {
+		rh := NewTTYRestoreHandler(nil, fetcher.Fetcher)
+		if err := rh.StopTracking(); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("StopTracking() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := rh.OnCopySkipped(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("OnCopySkipped() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := rh.PostCopy(ctx, fetcher.OciImage); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("PostCopy() error = %v, want %v", err, errTrackingNotStarted)
+		}
+	})
+
+	t.Run("TTYBlobPushHandler", func(t *testing.T) {
+		bph := NewTTYBlobPushHandler(nil, fetcher.OciImage)
+		if err := bph.StopTracking(); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("StopTracking() error = %v, want %v", err, errTrackingNotStarted)
+		}
+		if err := bph.OnBlobExists(); !errors.Is(err, errTrackingNotStarted) {
+			t.Errorf("OnBlobExists() error = %v, want %v", err, errTrackingNotStarted)
+		}
+	})
+}
+
+func TestTTYCopyHandler_PostCopy_usesFetcherAndTracksStates(t *testing.T) {
+	fetcher := testutils.NewMockFetcher()
+	tracked := &recordingTrackedTarget{}
+	ch := &TTYCopyHandler{
+		tracked: tracked,
+		fetcher: fetcher.Fetcher,
+	}
+	ch.committed.Store(fetcher.ImageLayer.Digest.String(), fetcher.ImageLayer.Annotations[ocispec.AnnotationTitle]+"1")
+
+	if err := ch.PostCopy(ctx, fetcher.OciImage); err != nil {
+		t.Fatalf("PostCopy() error = %v", err)
+	}
+	if err := ch.OnCopySkipped(ctx, fetcher.ImageLayer); err != nil {
+		t.Fatalf("OnCopySkipped() error = %v", err)
+	}
+	if err := ch.OnMounted(ctx, fetcher.ImageLayer); err != nil {
+		t.Fatalf("OnMounted() error = %v", err)
+	}
+	wantStates := []progress.State{
+		progress.StateSkipped,
+		progress.StateExists,
+		progress.StateMounted,
+	}
+	if !reflect.DeepEqual(tracked.states, wantStates) {
+		t.Errorf("reported states = %v, want %v", tracked.states, wantStates)
+	}
+}

@@ -17,6 +17,7 @@ package status
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 
@@ -28,6 +29,39 @@ import (
 	"oras.land/oras/cmd/oras/internal/display/status/track"
 	"oras.land/oras/internal/progress"
 )
+
+var errTrackingNotStarted = errors.New("status tracking has not started")
+
+func reportTracked(tracked track.GraphTarget, desc ocispec.Descriptor, state progress.State) error {
+	if tracked == nil {
+		return errTrackingNotStarted
+	}
+	return tracked.Report(desc, state)
+}
+
+func closeTracked(tracked track.GraphTarget) error {
+	if tracked == nil {
+		return errTrackingNotStarted
+	}
+	return tracked.Close()
+}
+
+func reportSkippedSuccessors(ctx context.Context, fetcher content.Fetcher, tracked track.GraphTarget, committed *sync.Map, desc ocispec.Descriptor) error {
+	committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
+	successors, err := graph.FilteredSuccessors(ctx, desc, fetcher, DeduplicatedFilter(committed))
+	if err != nil {
+		return err
+	}
+	if tracked == nil {
+		return errTrackingNotStarted
+	}
+	for _, successor := range successors {
+		if err = tracked.Report(successor, progress.StateSkipped); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // TTYPushHandler handles TTY status output for push command.
 type TTYPushHandler struct {
@@ -76,7 +110,7 @@ func (ph *TTYPushHandler) TrackTarget(gt oras.GraphTarget) (oras.GraphTarget, St
 // OnCopySkipped is called when an object already exists.
 func (ph *TTYPushHandler) OnCopySkipped(_ context.Context, desc ocispec.Descriptor) error {
 	ph.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	return ph.tracked.Report(desc, progress.StateExists)
+	return reportTracked(ph.tracked, desc, progress.StateExists)
 }
 
 // PreCopy implements PreCopy of CopyHandler.
@@ -86,17 +120,7 @@ func (ph *TTYPushHandler) PreCopy(_ context.Context, _ ocispec.Descriptor) error
 
 // PostCopy implements PostCopy of CopyHandler.
 func (ph *TTYPushHandler) PostCopy(ctx context.Context, desc ocispec.Descriptor) error {
-	ph.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	successors, err := graph.FilteredSuccessors(ctx, desc, ph.fetcher, DeduplicatedFilter(ph.committed))
-	if err != nil {
-		return err
-	}
-	for _, successor := range successors {
-		if err = ph.tracked.Report(successor, progress.StateSkipped); err != nil {
-			return err
-		}
-	}
-	return nil
+	return reportSkippedSuccessors(ctx, ph.fetcher, ph.tracked, ph.committed, desc)
 }
 
 // NewTTYAttachHandler returns a new handler for attach status events.
@@ -134,12 +158,12 @@ func (ph *TTYPullHandler) OnNodeProcessing(_ ocispec.Descriptor) error {
 
 // OnNodeRestored implements PullHandler.
 func (ph *TTYPullHandler) OnNodeRestored(desc ocispec.Descriptor) error {
-	return ph.tracked.Report(desc, progress.StateRestored)
+	return reportTracked(ph.tracked, desc, progress.StateRestored)
 }
 
 // OnNodeSkipped implements PullHandler.
 func (ph *TTYPullHandler) OnNodeSkipped(desc ocispec.Descriptor) error {
-	return ph.tracked.Report(desc, progress.StateSkipped)
+	return reportTracked(ph.tracked, desc, progress.StateSkipped)
 }
 
 // TrackTarget returns a tracked target.
@@ -164,12 +188,14 @@ type TTYCopyHandler struct {
 	tty       *os.File
 	committed sync.Map
 	tracked   track.GraphTarget
+	fetcher   content.Fetcher
 }
 
 // NewTTYCopyHandler returns a new handler for copy command.
-func NewTTYCopyHandler(tty *os.File) CopyHandler {
+func NewTTYCopyHandler(tty *os.File, fetcher content.Fetcher) CopyHandler {
 	return &TTYCopyHandler{
-		tty: tty,
+		tty:     tty,
+		fetcher: fetcher,
 	}
 }
 
@@ -193,13 +219,13 @@ func (ch *TTYCopyHandler) StartTracking(gt oras.GraphTarget) (oras.GraphTarget, 
 
 // StopTracking ends the copy tracking for the target.
 func (ch *TTYCopyHandler) StopTracking() error {
-	return ch.tracked.Close()
+	return closeTracked(ch.tracked)
 }
 
 // OnCopySkipped is called when an object already exists.
 func (ch *TTYCopyHandler) OnCopySkipped(_ context.Context, desc ocispec.Descriptor) error {
 	ch.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	return ch.tracked.Report(desc, progress.StateExists)
+	return reportTracked(ch.tracked, desc, progress.StateExists)
 }
 
 // PreCopy implements PreCopy of CopyHandler.
@@ -209,23 +235,13 @@ func (ch *TTYCopyHandler) PreCopy(context.Context, ocispec.Descriptor) error {
 
 // PostCopy implements PostCopy of CopyHandler.
 func (ch *TTYCopyHandler) PostCopy(ctx context.Context, desc ocispec.Descriptor) error {
-	ch.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	successors, err := graph.FilteredSuccessors(ctx, desc, ch.tracked, DeduplicatedFilter(&ch.committed))
-	if err != nil {
-		return err
-	}
-	for _, successor := range successors {
-		if err = ch.tracked.Report(successor, progress.StateSkipped); err != nil {
-			return err
-		}
-	}
-	return nil
+	return reportSkippedSuccessors(ctx, ch.fetcher, ch.tracked, &ch.committed, desc)
 }
 
 // OnMounted implements OnMounted of CopyHandler.
 func (ch *TTYCopyHandler) OnMounted(_ context.Context, desc ocispec.Descriptor) error {
 	ch.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	return ch.tracked.Report(desc, progress.StateMounted)
+	return reportTracked(ch.tracked, desc, progress.StateMounted)
 }
 
 // TTYBackupHandler handles tty status output for backup events.
@@ -265,13 +281,13 @@ func (bh *TTYBackupHandler) StartTracking(gt oras.GraphTarget) (oras.GraphTarget
 
 // StopTracking ends the backup tracking for the target.
 func (bh *TTYBackupHandler) StopTracking() error {
-	return bh.tracked.Close()
+	return closeTracked(bh.tracked)
 }
 
 // OnCopySkipped implements OnCopySkipped of BackupHandler.
 func (bh *TTYBackupHandler) OnCopySkipped(_ context.Context, desc ocispec.Descriptor) error {
 	bh.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	return bh.tracked.Report(desc, progress.StateExists)
+	return reportTracked(bh.tracked, desc, progress.StateExists)
 }
 
 // PreCopy implements PreCopy of BackupHandler.
@@ -281,17 +297,7 @@ func (bh *TTYBackupHandler) PreCopy(_ context.Context, _ ocispec.Descriptor) err
 
 // PostCopy implements PostCopy of BackupHandler.
 func (bh *TTYBackupHandler) PostCopy(ctx context.Context, desc ocispec.Descriptor) error {
-	bh.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	successors, err := graph.FilteredSuccessors(ctx, desc, bh.fetcher, DeduplicatedFilter(bh.committed))
-	if err != nil {
-		return err
-	}
-	for _, successor := range successors {
-		if err = bh.tracked.Report(successor, progress.StateSkipped); err != nil {
-			return err
-		}
-	}
-	return nil
+	return reportSkippedSuccessors(ctx, bh.fetcher, bh.tracked, bh.committed, desc)
 }
 
 // TTYRestoreHandler handles tty status output for restore events.
@@ -331,13 +337,13 @@ func (rh *TTYRestoreHandler) StartTracking(gt oras.GraphTarget) (oras.GraphTarge
 
 // StopTracking ends the restore tracking for the target.
 func (rh *TTYRestoreHandler) StopTracking() error {
-	return rh.tracked.Close()
+	return closeTracked(rh.tracked)
 }
 
 // OnCopySkipped implements OnCopySkipped of RestoreHandler.
 func (rh *TTYRestoreHandler) OnCopySkipped(_ context.Context, desc ocispec.Descriptor) error {
 	rh.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	return rh.tracked.Report(desc, progress.StateExists)
+	return reportTracked(rh.tracked, desc, progress.StateExists)
 }
 
 // PreCopy implements PreCopy of RestoreHandler.
@@ -347,17 +353,7 @@ func (rh *TTYRestoreHandler) PreCopy(_ context.Context, _ ocispec.Descriptor) er
 
 // PostCopy implements PostCopy of RestoreHandler.
 func (rh *TTYRestoreHandler) PostCopy(ctx context.Context, desc ocispec.Descriptor) error {
-	rh.committed.Store(desc.Digest.String(), desc.Annotations[ocispec.AnnotationTitle])
-	successors, err := graph.FilteredSuccessors(ctx, desc, rh.fetcher, DeduplicatedFilter(rh.committed))
-	if err != nil {
-		return err
-	}
-	for _, successor := range successors {
-		if err = rh.tracked.Report(successor, progress.StateSkipped); err != nil {
-			return err
-		}
-	}
-	return nil
+	return reportSkippedSuccessors(ctx, rh.fetcher, rh.tracked, rh.committed, desc)
 }
 
 // TTYBlobPushHandler handles tty status output for blob push events.
@@ -393,12 +389,12 @@ func (bph *TTYBlobPushHandler) StartTracking(gt oras.GraphTarget) (oras.GraphTar
 
 // StopTracking ends the blob push tracking for the target.
 func (bph *TTYBlobPushHandler) StopTracking() error {
-	return bph.tracked.Close()
+	return closeTracked(bph.tracked)
 }
 
 // OnBlobExists implements BlobPushHandler.
 func (bph *TTYBlobPushHandler) OnBlobExists() error {
-	return bph.tracked.Report(bph.desc, progress.StateExists)
+	return reportTracked(bph.tracked, bph.desc, progress.StateExists)
 }
 
 // OnBlobUploading implements BlobPushHandler.
