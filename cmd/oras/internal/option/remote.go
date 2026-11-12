@@ -24,7 +24,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -200,14 +199,29 @@ func (remo *Remote) Parse(cmd *cobra.Command) error {
 
 // readSecret tries to read password or identity token with
 // optional cmd prompt.
-func (remo *Remote) readSecret(cmd *cobra.Command) (err error) {
-	if cmd.Flags().Changed(identityTokenFlag) {
-		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "WARNING! Using --identity-token via the CLI is insecure. Use --identity-token-stdin.")
-	} else if cmd.Flags().Changed(passwordFlag) {
-		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "WARNING! Using --password via the CLI is insecure. Use --password-stdin.")
-	} else if remo.secretFromStdin {
+func (remo *Remote) readSecret(cmd *cobra.Command) error {
+	secretFlags := []struct {
+		flag      string
+		stdinFlag string
+	}{
+		{identityTokenFlag, identityTokenFromStdinFlag},
+		{passwordFlag, passwordFromStdinFlag},
+	}
+	for _, sf := range secretFlags {
+		flagName := remo.flagPrefix + sf.flag
+		if cmd.Flags().Changed(flagName) {
+			stdinName := remo.flagPrefix + sf.stdinFlag
+			if cmd.Flags().Lookup(stdinName) != nil {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "WARNING! Using --%s via the CLI is insecure. Use --%s.\n", flagName, stdinName)
+			} else {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "WARNING! Using --%s via the CLI is insecure.\n", flagName)
+			}
+			return nil
+		}
+	}
+	if remo.secretFromStdin {
 		// Prompt for credential
-		secret, err := io.ReadAll(os.Stdin)
+		secret, err := io.ReadAll(cmd.InOrStdin())
 		if err != nil {
 			return err
 		}

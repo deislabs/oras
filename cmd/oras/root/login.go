@@ -85,7 +85,7 @@ func runLogin(cmd *cobra.Command, opts loginOptions) (err error) {
 	if opts.Secret == "" {
 		if opts.Username == "" {
 			// prompt for username
-			username, err := readLine(opts.Printer, "Username: ", false)
+			username, err := readLine(cmd.InOrStdin(), opts.Printer, "Username: ", false)
 			if err != nil {
 				return err
 			}
@@ -93,14 +93,14 @@ func runLogin(cmd *cobra.Command, opts loginOptions) (err error) {
 		}
 		if opts.Username == "" {
 			// prompt for token
-			if opts.Secret, err = readLine(opts.Printer, "Token: ", true); err != nil {
+			if opts.Secret, err = readLine(cmd.InOrStdin(), opts.Printer, "Token: ", true); err != nil {
 				return err
 			} else if opts.Secret == "" {
 				return errors.New("token required")
 			}
 		} else {
 			// prompt for password
-			if opts.Secret, err = readLine(opts.Printer, "Password: ", true); err != nil {
+			if opts.Secret, err = readLine(cmd.InOrStdin(), opts.Printer, "Password: ", true); err != nil {
 				return err
 			} else if opts.Secret == "" {
 				return errors.New("password required")
@@ -123,17 +123,16 @@ func runLogin(cmd *cobra.Command, opts loginOptions) (err error) {
 	return nil
 }
 
-func readLine(outWriter io.Writer, prompt string, silent bool) (string, error) {
+func readLine(in io.Reader, outWriter io.Writer, prompt string, silent bool) (string, error) {
 	_, _ = fmt.Fprint(outWriter, prompt)
-	fd := int(os.Stdin.Fd())
 	var bytes []byte
 	var err error
-	if silent && term.IsTerminal(fd) {
-		if bytes, err = term.ReadPassword(fd); err == nil {
+	if f, ok := in.(*os.File); silent && ok && term.IsTerminal(int(f.Fd())) {
+		if bytes, err = term.ReadPassword(int(f.Fd())); err == nil {
 			_, err = fmt.Fprintln(outWriter)
 		}
 	} else {
-		bytes, err = orasio.ReadLine(os.Stdin)
+		bytes, err = orasio.ReadLine(in)
 	}
 	if err != nil {
 		return "", err
