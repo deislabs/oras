@@ -1368,3 +1368,44 @@ func TestRemote_warningHandler(t *testing.T) {
 		}
 	}
 }
+
+func TestRemote_ConfigPath_independentOfAuthClient(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	opts := Remote{Configs: []string{configPath}}
+	got, err := opts.ConfigPath()
+	if err != nil {
+		t.Fatalf("ConfigPath() error = %v", err)
+	}
+	if got != configPath {
+		t.Errorf("ConfigPath() = %q, want %q", got, configPath)
+	}
+
+	decorated := opts.DecorateCredentialError(auth.ErrBasicCredentialNotFound)
+	wantQuotedPath := fmt.Sprintf("at %q", configPath)
+	if !strings.Contains(decorated.Recommendation, wantQuotedPath) {
+		t.Errorf("DecorateCredentialError() recommendation = %q, want substring %q", decorated.Recommendation, wantQuotedPath)
+	}
+
+	secondConfig := filepath.Join(dir, "config2.json")
+	if err := os.WriteFile(secondConfig, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	multiOpts := Remote{Configs: []string{configPath, secondConfig}}
+	if _, err := multiOpts.ConfigPath(); err == nil {
+		t.Error("ConfigPath() with multiple config files = nil, want error")
+	}
+
+	invalidConfig := filepath.Join(dir, "invalid.json")
+	if err := os.WriteFile(invalidConfig, []byte(`{invalid`), 0o600); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	invalidOpts := Remote{Configs: []string{invalidConfig}}
+	if _, err := invalidOpts.ConfigPath(); err == nil {
+		t.Error("ConfigPath() with invalid config JSON = nil, want error")
+	}
+}

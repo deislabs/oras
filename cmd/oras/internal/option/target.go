@@ -62,7 +62,6 @@ type Target struct {
 
 	IsOCILayout bool
 
-	prefix      string
 	description string
 }
 
@@ -74,7 +73,7 @@ func (target *Target) GetDisplayReference() string {
 // setFlagDetails set directional flag prefix and description details
 func (target *Target) setFlagDetails(prefix, description string) {
 	if prefix != "" {
-		target.prefix = prefix + "-"
+		target.flagPrefix = prefix + "-"
 		target.description = description + " "
 	}
 }
@@ -89,12 +88,12 @@ func (target *Target) setFlagDetails(prefix, description string) {
 // Since there is only one target type besides the default `registry` type,
 // the full form is not implemented until a new type comes in.
 func (target *Target) ApplyFlags(fs *pflag.FlagSet) {
-	target.ApplyFlagsWithPrefix(fs, target.prefix, target.description)
-	if target.prefix == "" {
+	target.ApplyFlagsWithPrefix(fs, target.flagPrefix, target.description)
+	if target.flagPrefix == "" {
 		target.applyStdinFlags(fs)
 	}
-	fs.BoolVarP(&target.IsOCILayout, target.prefix+"oci-layout", "", false, "set "+target.description+"target as an OCI image layout")
-	fs.StringVar(&target.Path, target.prefix+"oci-layout-path", "", "[Experimental] set the path for the "+target.description+"OCI image layout target")
+	fs.BoolVarP(&target.IsOCILayout, target.flagPrefix+"oci-layout", "", false, "set "+target.description+"target as an OCI image layout")
+	fs.StringVar(&target.Path, target.flagPrefix+"oci-layout-path", "", "[Experimental] set the path for the "+target.description+"OCI image layout target")
 }
 
 const errHeaderFlagsOnOCILayout = "custom header flags cannot be used on an OCI image layout target"
@@ -172,73 +171,81 @@ func (target *Target) newRepository(common Common, logger logrus.FieldLogger) (*
 	return target.NewRepository(target.Path, common, logger)
 }
 
-// NewTarget generates a new target based on target.
-func (target *Target) NewTarget(common Common, logger logrus.FieldLogger) (oras.GraphTarget, error) {
+func resolveByTargetType[T any](target *Target, ociFn func() (T, error), remoteFn func() (T, error)) (T, error) {
 	switch target.Type {
 	case TargetTypeOCILayout:
-		return target.newOCIStore()
+		return ociFn()
 	case TargetTypeRemote:
-		return target.newRepository(common, logger)
+		return remoteFn()
+	default:
+		var zero T
+		return zero, fmt.Errorf("unknown target type: %q", target.Type)
 	}
-	return nil, fmt.Errorf("unknown target type: %q", target.Type)
+}
+
+// NewTarget generates a new target based on target.
+func (target *Target) NewTarget(common Common, logger logrus.FieldLogger) (oras.GraphTarget, error) {
+	return resolveByTargetType(
+		target,
+		func() (oras.GraphTarget, error) { return target.newOCIStore() },
+		func() (oras.GraphTarget, error) { return target.newRepository(common, logger) },
+	)
+}
+
+func (target *Target) newDeleter(common Common, logger logrus.FieldLogger, selectDeleter func(*remote.Repository) ResolvableDeleter) (ResolvableDeleter, error) {
+	return resolveByTargetType(
+		target,
+		func() (ResolvableDeleter, error) { return target.newOCIStore() },
+		func() (ResolvableDeleter, error) {
+			repo, err := target.newRepository(common, logger)
+			if err != nil {
+				return nil, err
+			}
+			return selectDeleter(repo), nil
+		},
+	)
 }
 
 // NewBlobDeleter generates a new blob deleter based on target.
 func (target *Target) NewBlobDeleter(common Common, logger logrus.FieldLogger) (ResolvableDeleter, error) {
-	switch target.Type {
-	case TargetTypeOCILayout:
-		return target.newOCIStore()
-	case TargetTypeRemote:
-		repo, err := target.newRepository(common, logger)
-		if err != nil {
-			return nil, err
-		}
-		return repo.Blobs(), nil
-	}
-	return nil, fmt.Errorf("unknown target type: %q", target.Type)
+	return target.newDeleter(common, logger, func(repo *remote.Repository) ResolvableDeleter {
+		return repo.Blobs()
+	})
 }
 
-// NewManifestDeleter generates a new blob deleter based on target.
+// NewManifestDeleter generates a new manifest deleter based on target.
 func (target *Target) NewManifestDeleter(common Common, logger logrus.FieldLogger) (ResolvableDeleter, error) {
-	switch target.Type {
-	case TargetTypeOCILayout:
-		return target.newOCIStore()
-	case TargetTypeRemote:
-		repo, err := target.newRepository(common, logger)
-		if err != nil {
-			return nil, err
-		}
-		return repo.Manifests(), nil
-	}
-	return nil, fmt.Errorf("unknown target type: %q", target.Type)
+	return target.newDeleter(common, logger, func(repo *remote.Repository) ResolvableDeleter {
+		return repo.Manifests()
+	})
 }
 
 // NewReadonlyTarget generates a new read only target based on target.
 func (target *Target) NewReadonlyTarget(ctx context.Context, common Common, logger logrus.FieldLogger) (ReadOnlyGraphTagFinderTarget, error) {
-	switch target.Type {
-	case TargetTypeOCILayout:
-		info, err := os.Stat(target.Path)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil, fmt.Errorf("invalid argument %q: failed to find path %q: %w", target.RawReference, target.Path, err)
+	return resolveByTargetType(
+		target,
+		func() (ReadOnlyGraphTagFinderTarget, error) {
+			info, err := os.Stat(target.Path)
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					return nil, fmt.Errorf("invalid argument %q: failed to find path %q: %w", target.RawReference, target.Path, err)
+				}
+				return nil, err
 			}
-			return nil, err
-		}
-		if info.IsDir() {
-			return oci.NewFromFS(ctx, os.DirFS(target.Path))
-		}
-		store, err := oci.NewFromTar(ctx, target.Path)
-		if err != nil {
-			if errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil, fmt.Errorf("%q does not look like a tar archive: %w", target.Path, err)
+			if info.IsDir() {
+				return oci.NewFromFS(ctx, os.DirFS(target.Path))
 			}
-			return nil, err
-		}
-		return store, nil
-	case TargetTypeRemote:
-		return target.NewRepository(target.Path, common, logger)
-	}
-	return nil, fmt.Errorf("unknown target type: %q", target.Type)
+			store, err := oci.NewFromTar(ctx, target.Path)
+			if err != nil {
+				if errors.Is(err, io.ErrUnexpectedEOF) {
+					return nil, fmt.Errorf("%q does not look like a tar archive: %w", target.Path, err)
+				}
+				return nil, err
+			}
+			return store, nil
+		},
+		func() (ReadOnlyGraphTagFinderTarget, error) { return target.NewRepository(target.Path, common, logger) },
+	)
 }
 
 // EnsureReferenceNotEmpty returns an error when the reference is empty
@@ -255,7 +262,7 @@ func (target *Target) EnsureReferenceNotEmpty(cmd *cobra.Command, allowTag bool)
 
 // ModifyError handles error during cmd execution.
 func (target *Target) ModifyError(cmd *cobra.Command, err error) (bool, error) {
-	if target.IsOCILayout {
+	if target.Type == TargetTypeOCILayout || target.IsOCILayout {
 		// short circuit for non-remote targets
 		return false, err
 	}
