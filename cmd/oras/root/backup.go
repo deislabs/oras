@@ -250,6 +250,14 @@ func doBackup(
 	}
 
 	for i, tag := range tags {
+		// Add the full image reference to the title annotation
+		root := roots[i]
+		fullRef := opts.repository + ":" + tag
+		if root.Annotations == nil {
+			root.Annotations = make(map[string]string, 1)
+		}
+		root.Annotations[ocispec.AnnotationTitle] = fullRef
+
 		referrerCount, err := func() (referrerCount int, retErr error) {
 			trackedDst, err := statusHandler.StartTracking(dstOCI)
 			if err != nil {
@@ -263,9 +271,9 @@ func doBackup(
 			}()
 
 			if opts.includeReferrers {
-				return backupTagWithReferrers(ctx, srcRepo, trackedDst, tag, roots[i], extCopyGraphOpts)
+				return backupTagWithReferrers(ctx, srcRepo, trackedDst, tag, root, extCopyGraphOpts)
 			}
-			return 0, backupTag(ctx, srcRepo, trackedDst, tag, roots[i], copyGraphOpts)
+			return 0, backupTag(ctx, srcRepo, trackedDst, tag, root, copyGraphOpts)
 		}()
 		if err != nil {
 			return fmt.Errorf("failed to back up tag %q from %q to %q: %w", tag, opts.repository, dstRoot, oerrors.UnwrapCopyError(err))

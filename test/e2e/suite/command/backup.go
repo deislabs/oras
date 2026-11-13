@@ -16,6 +16,7 @@ limitations under the License.
 package command
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
@@ -468,6 +470,38 @@ var _ = Describe("ORAS users:", func() {
 			verifyBackupDirectoryStructure(outDir)
 			// Verify backed up content
 			compareBackupRef(src, LayoutRef(outDir, ma.Tag))
+		})
+	})
+
+	When("verifying annotations", func() {
+		It("should set org.opencontainers.image.title annotation with full reference", func() {
+			tmpDir := GinkgoT().TempDir()
+			outDir := filepath.Join(tmpDir, "backup-title-annotation")
+			repo := backupTestRepo("title-annotation")
+			tag := "v1.0"
+			srcRef := RegistryRef(ZOTHost, repo, tag)
+
+			prepare(RegistryRef(ZOTHost, ArtifactRepo, foobar.Tag), srcRef)
+
+			ORAS("backup", "--output", outDir, srcRef).Exec()
+
+			verifyBackupDirectoryStructure(outDir)
+
+			// Read and verify index.json annotations
+			indexPath := filepath.Join(outDir, "index.json")
+			indexBytes, err := os.ReadFile(indexPath)
+			Expect(err).ToNot(HaveOccurred())
+
+			var index ocispec.Index
+			err = json.Unmarshal(indexBytes, &index)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(index.Manifests).ToNot(BeEmpty())
+
+			// Verify annotations on the first manifest
+			annotations := index.Manifests[0].Annotations
+			Expect(annotations["org.opencontainers.image.ref.name"]).To(Equal(tag))
+			expectedFullRef := fmt.Sprintf("%s/%s:%s", ZOTHost, repo, tag)
+			Expect(annotations[ocispec.AnnotationTitle]).To(Equal(expectedFullRef))
 		})
 	})
 
