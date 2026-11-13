@@ -90,7 +90,7 @@ func TestTTYCopyHandler_OnMounted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = child.Close() }()
-	ch := NewTTYCopyHandler(child)
+	ch := NewTTYCopyHandler(child, nil)
 	_, err = ch.StartTracking(&testGraphTarget{memory.New()})
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ func TestTTYCopyHandler_OnCopySkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = child.Close() }()
-	ch := NewTTYCopyHandler(child)
+	ch := NewTTYCopyHandler(child, nil)
 	_, err = ch.StartTracking(&testGraphTarget{memory.New()})
 	if err != nil {
 		t.Fatal(err)
@@ -139,8 +139,9 @@ func TestTTYCopyHandler_PostCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = child.Close() }()
-	ch := NewTTYCopyHandler(child)
-	_, err = ch.StartTracking(&testGraphTarget{memory.New()})
+	store := &testGraphTarget{memory.New()}
+	ch := NewTTYCopyHandler(child, store)
+	_, err = ch.StartTracking(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestTTYCopyHandler_PreCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = child.Close() }()
-	ch := NewTTYCopyHandler(child)
+	ch := NewTTYCopyHandler(child, nil)
 	_, err = ch.StartTracking(&testGraphTarget{memory.New()})
 	if err != nil {
 		t.Fatal(err)
