@@ -120,7 +120,7 @@ func doDeleteManifest(
 	}
 
 	prompt := fmt.Sprintf("Are you sure you want to delete the manifest %q and all tags associated with it?", desc.Digest)
-	confirmed, err := opts.AskForConfirmation(os.Stdin, prompt)
+	confirmed, err := opts.AskForConfirmation(cmd.InOrStdin(), prompt)
 	if err != nil {
 		return err
 	}
