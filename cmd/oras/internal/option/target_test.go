@@ -26,6 +26,7 @@ import (
 
 	"github.com/oras-project/oras-go/v3/errdef"
 	"github.com/oras-project/oras-go/v3/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -225,6 +226,14 @@ func TestTarget_ModifyError_NotFound(t *testing.T) {
 			wantErrPrefix: "Error:",
 			wantModified:  false,
 			isOCILayout:   true,
+		},
+		{
+			name:          "oci layout path not found",
+			targetType:    TargetTypeOCILayout,
+			rawReference:  "latest",
+			wantErrPrefix: "Error:",
+			wantModified:  false,
+			isOCILayout:   false,
 		},
 		{
 			name:          "remote not found",
@@ -584,5 +593,67 @@ func TestTarget_Parse_remote_scheme(t *testing.T) {
 		if err := opts.Parse(cmd); err == nil {
 			t.Errorf("expect Target.Parse(%q) to fail but not", raw)
 		}
+	}
+}
+
+func TestTarget_ModifyError_ociLayoutPathSkipsRemoteHandling(t *testing.T) {
+	opts := &Target{
+		Type:         TargetTypeOCILayout,
+		Path:         t.TempDir(),
+		RawReference: "latest",
+		IsOCILayout:  false,
+	}
+	errs := []error{
+		auth.ErrBasicCredentialNotFound,
+		errdef.ErrNotFound,
+		&errcode.ErrorResponse{
+			URL:        &url.URL{Host: "localhost:5000"},
+			StatusCode: http.StatusUnauthorized,
+		},
+	}
+	for _, inputErr := range errs {
+		cmd := &cobra.Command{}
+		modified, got := opts.ModifyError(cmd, inputErr)
+		if modified {
+			t.Errorf("ModifyError(%T) modified = true, want false", inputErr)
+		}
+		if !errors.Is(got, inputErr) {
+			t.Errorf("ModifyError(%T) = %v, want %v", inputErr, got, inputErr)
+		}
+		if gotPrefix, wantPrefix := cmd.ErrPrefix(), "Error:"; gotPrefix != wantPrefix {
+			t.Errorf("ModifyError(%T) cmd.ErrPrefix() = %q, want %q", inputErr, gotPrefix, wantPrefix)
+		}
+	}
+}
+
+func TestTarget_unknownTypeErrors(t *testing.T) {
+	opts := Target{Type: "unsupported"}
+	if _, err := opts.NewTarget(Common{}, logrus.New()); err == nil || !strings.Contains(err.Error(), "unknown target type") {
+		t.Errorf("NewTarget() error = %v, want unknown target type error", err)
+	}
+	if _, err := opts.NewBlobDeleter(Common{}, logrus.New()); err == nil || !strings.Contains(err.Error(), "unknown target type") {
+		t.Errorf("NewBlobDeleter() error = %v, want unknown target type error", err)
+	}
+	if _, err := opts.NewManifestDeleter(Common{}, logrus.New()); err == nil || !strings.Contains(err.Error(), "unknown target type") {
+		t.Errorf("NewManifestDeleter() error = %v, want unknown target type error", err)
+	}
+	if _, err := opts.NewReadonlyTarget(context.Background(), Common{}, logrus.New()); err == nil || !strings.Contains(err.Error(), "unknown target type") {
+		t.Errorf("NewReadonlyTarget() error = %v, want unknown target type error", err)
+	}
+}
+
+func TestTarget_NewTarget_ociLayout(t *testing.T) {
+	opts := Target{
+		Type: TargetTypeOCILayout,
+		Path: t.TempDir(),
+	}
+	if _, err := opts.NewTarget(Common{}, logrus.New()); err != nil {
+		t.Errorf("NewTarget() error = %v", err)
+	}
+	if _, err := opts.NewBlobDeleter(Common{}, logrus.New()); err != nil {
+		t.Errorf("NewBlobDeleter() error = %v", err)
+	}
+	if _, err := opts.NewManifestDeleter(Common{}, logrus.New()); err != nil {
+		t.Errorf("NewManifestDeleter() error = %v", err)
 	}
 }

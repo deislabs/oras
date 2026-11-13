@@ -492,14 +492,12 @@ func (remo *Remote) authClientWithProperties(registry string, plainHTTP, debug b
 			return cred, nil
 		}
 	} else {
-		var err error
-		remo.store, err = credential.NewStore(remo.Configs...)
+		store, err := remo.credentialStore()
 		if err != nil {
 			return nil, err
 		}
-		store := remo.store
 		if fallbackStore != nil {
-			store = credentials.NewStoreWithFallbacks(remo.store, fallbackStore)
+			store = credentials.NewStoreWithFallbacks(store, fallbackStore)
 		}
 		client.CredentialFunc = remote.NewCredentialFunc(store)
 	}
@@ -507,12 +505,24 @@ func (remo *Remote) authClientWithProperties(registry string, plainHTTP, debug b
 	return
 }
 
+func (remo *Remote) credentialStore() (credentials.Store, error) {
+	if remo.store == nil {
+		store, err := credential.NewStore(remo.Configs...)
+		if err != nil {
+			return nil, err
+		}
+		remo.store = store
+	}
+	return remo.store, nil
+}
+
 // ConfigPath returns the config path of the credential store.
 func (remo *Remote) ConfigPath() (string, error) {
-	if remo.store == nil {
-		return "", errors.New("no credential store initialized")
+	store, err := remo.credentialStore()
+	if err != nil {
+		return "", err
 	}
-	if ds, ok := remo.store.(*credentials.DynamicStore); ok {
+	if ds, ok := store.(*credentials.DynamicStore); ok {
 		return ds.ConfigPath(), nil
 	}
 	return "", errors.New("store doesn't support getting config path")
