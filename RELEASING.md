@@ -75,6 +75,10 @@ scripts/release.sh --dry-run tag VERSION COMMIT_SHA
 
 `validate` and `publish` need a real tag and the `_dist/` directory downloaded by `validate`, so they cannot be dry-run before a release.
 
+## Container image tags
+
+The `release-ghcr` workflow always pushes the `vVERSION` image tag. For stable releases it also moves the rolling `vX.Y`, `vX`, and `latest` tags, but only when `vVERSION` is the highest stable tag in that minor series, major series, or overall, respectively. Pre-releases never move rolling tags, and a backport to an older series moves only the rolling tags it is newest for, so rolling tags never move backwards.
+
 ## Post-release tasks
 
 - Open a pull request in [oras-www](https://github.com/oras-project/oras-www) and complete the following checklist, replacing `X.Y` with the release series and `VERSION` with the full release version:
