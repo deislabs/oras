@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/oras-project/oras-go/v3"
@@ -56,6 +57,7 @@ type pushOptions struct {
 	artifactType      string
 	force             bool
 	concurrency       int
+	reproducible      bool
 	// Deprecated: verbose is deprecated and will be removed in the future.
 	verbose bool
 }
@@ -177,6 +179,7 @@ Example - Push file "hi.txt" into an OCI image layout folder 'layout-dir' with t
 	cmd.Flags().StringVarP(&opts.artifactType, "artifact-type", "", "", "artifact type")
 	cmd.Flags().BoolVarP(&opts.force, "force", "", false, "force a deep traversal of the destination graph before tagging the root; useful when the destination is partially populated (e.g. by a registry cache)")
 	cmd.Flags().IntVarP(&opts.concurrency, "concurrency", "", 5, "concurrency level")
+	cmd.Flags().BoolVarP(&opts.reproducible, "reproducible", "", false, "make it reproducible")
 	cmd.Flags().BoolVarP(&opts.verbose, "verbose", "v", true, "print status output for unnamed blobs")
 	_ = cmd.Flags().MarkDeprecated("verbose", "and will be removed in a future release.")
 	opts.SetTypes(option.FormatTypeText, option.FormatTypeJSON, option.FormatTypeGoTemplate)
@@ -197,6 +200,20 @@ func runPush(cmd *cobra.Command, opts *pushOptions) error {
 		return err
 	}
 	defer func() { _ = store.Close() }()
+
+	if opts.reproducible {
+		// make manifest reproducible
+		annotations := packOpts.ManifestAnnotations
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		zero := time.Time{}
+		annotations[ocispec.AnnotationCreated] = zero.Format(time.RFC3339)
+		packOpts.ManifestAnnotations = annotations
+
+		store.TarReproducible = true
+	}
+
 	if opts.manifestConfigRef != "" {
 		path, cfgMediaType, err := fileref.Parse(opts.manifestConfigRef, oras.MediaTypeUnknownConfig)
 		if err != nil {

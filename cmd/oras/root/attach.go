@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/oras-project/oras-go/v3"
@@ -49,6 +50,7 @@ type attachOptions struct {
 	artifactType      string
 	manifestConfigRef string
 	concurrency       int
+	reproducible      bool
 	// Deprecated: verbose is deprecated and will be removed in the future.
 	verbose bool
 }
@@ -136,6 +138,7 @@ Example - Attach file 'hi.txt' with the custom manifest config "config.json" of 
 	cmd.Flags().BoolVarP(&opts.verbose, "verbose", "v", true, "print status output for unnamed blobs")
 	opts.FlagDescription = "attach to an arch-specific subject"
 	_ = cmd.MarkFlagRequired("artifact-type")
+	cmd.Flags().BoolVarP(&opts.reproducible, "reproducible", "", false, "make it reproducible")
 	_ = cmd.Flags().MarkDeprecated("verbose", "and will be removed in a future release.")
 	opts.EnableDistributionSpecFlag()
 	opts.SetTypes(option.FormatTypeText, option.FormatTypeJSON, option.FormatTypeGoTemplate)
@@ -223,6 +226,19 @@ func doAttach(ctx context.Context, opts *attachOptions, store *file.Store, dst o
 	}
 	pack := func() (ocispec.Descriptor, error) {
 		return oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, opts.artifactType, packOpts)
+	}
+
+	if opts.reproducible {
+		// make manifest reproducible
+		annotations := packOpts.ManifestAnnotations
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		zero := time.Time{}
+		annotations[ocispec.AnnotationCreated] = zero.Format(time.RFC3339)
+		packOpts.ManifestAnnotations = annotations
+
+		store.TarReproducible = true
 	}
 
 	copyFunc := func(root ocispec.Descriptor) error {
