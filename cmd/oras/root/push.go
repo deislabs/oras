@@ -133,6 +133,15 @@ Example - Push file "hi.txt" into an OCI image layout folder 'layout-dir' with t
 			if err := option.Parse(cmd, &opts); err != nil {
 				return err
 			}
+			if opts.Target.Type == option.TargetTypeOCILayout {
+				if opts.IsOCILayout {
+					if opts.Reference != "" && !strings.Contains(opts.RawReference, "@") {
+						if err := option.ValidateOCILayoutTag(opts.Reference); err != nil {
+							return err
+						}
+					}
+				}
+			}
 			if err := option.ValidateExtraTags(opts.extraRefs); err != nil {
 				return err
 			}

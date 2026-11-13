@@ -117,8 +117,8 @@ func (target *Target) Parse(cmd *cobra.Command) error {
 		if len(target.headerFlags) != 0 {
 			return errors.New(errHeaderFlagsOnOCILayout)
 		}
-		target.Reference = target.RawReference
-		return nil
+
+		return target.parseOCILayoutPathReference()
 	default:
 		target.Type = TargetTypeRemote
 		ref, err := repository.ParseReference(target.RawReference)
@@ -159,6 +159,23 @@ func (target *Target) parseOCILayoutReference() error {
 	}
 	target.Path = path
 	target.Reference = ref
+	return nil
+}
+
+// parseOCILayoutPathReference validates the reference for an OCI layout path.
+func (target *Target) parseOCILayoutPathReference() error {
+	raw := target.RawReference
+	if atIndex := strings.LastIndex(raw, "@"); atIndex != -1 {
+		digest := raw[atIndex+1:]
+		if !contentutil.IsDigest(digest) {
+			return errors.Join(
+				fmt.Errorf("invalid digest: %q", digest),
+				errdef.ErrInvalidReference,
+			)
+		}
+	}
+
+	target.Reference = raw
 	return nil
 }
 
